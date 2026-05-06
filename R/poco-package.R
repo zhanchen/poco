@@ -32,7 +32,7 @@
 #' @keywords internal
 #' @importFrom utils head object.size
 #' @importFrom stats cov sd
-#' @importFrom mclust Mclust
+#' @importFrom mclust Mclust mclustBIC
 #' @importFrom mvtnorm rmvnorm dmvnorm
 "_PACKAGE"
 
