@@ -222,6 +222,76 @@ test_pts <- rbind(c(5.5, 2.0, 2.0), c(6.2, 1.9, 1.8), c(7.0, 1.8, 2.1))
 sapply(fits, function(f) density_posterior(f, test_pts))
 ```
 
+## Compression runtime benchmark
+
+Benchmark compression on the same synthetic posterior matrix for each
+backend and visualize runtime.
+
+```{r benchmark-compression, fig.width=8, fig.height=4}
+if (requireNamespace("microbenchmark", quietly = TRUE) &&
+    requireNamespace("ggplot2", quietly = TRUE)) {
+  benchmark_draws <- draws
+  has_mvdens <- requireNamespace("mvdens", quietly = TRUE)
+
+  bench_parts <- list(
+    mclust_gmm = microbenchmark::microbenchmark(
+      mclust_gmm = compress_posterior(
+        benchmark_draws,
+        method = "mclust",
+        n_components = 2
+      ),
+      times = 10,
+      unit = "ms"
+    )
+  )
+
+  if (has_mvdens) {
+    bench_parts$mvdens_gmm <- microbenchmark::microbenchmark(
+      mvdens_gmm = compress_posterior(
+        benchmark_draws,
+        method = "mvdens_gmm",
+        n_components = 2
+      ),
+      times = 10,
+      unit = "ms"
+    )
+
+    bench_parts$mvdens_kde <- microbenchmark::microbenchmark(
+      mvdens_kde = compress_posterior(
+        benchmark_draws,
+        method = "mvdens_kde"
+      ),
+      times = 10,
+      unit = "ms"
+    )
+  }
+
+  bench_compression <- do.call(
+    rbind,
+    lapply(bench_parts, function(x) {
+      out <- as.data.frame(x)
+      out$time_ms <- out$time / 1e6
+      out
+    })
+  )
+
+  print(bench_compression[, c("expr", "time_ms")])
+
+  ggplot2::ggplot(bench_compression, ggplot2::aes(x = expr, y = time_ms, color = expr)) +
+    ggplot2::geom_boxplot(outlier.shape = NA, alpha = 0.2) +
+    ggplot2::geom_jitter(width = 0.12, alpha = 0.7, size = 2) +
+    ggplot2::labs(
+      title = "Compression runtime by method",
+      x = "Method",
+      y = "Time (ms)"
+    ) +
+    ggplot2::theme_bw() +
+    ggplot2::theme(legend.position = "none")
+} else {
+  message("Install suggested packages 'microbenchmark' and 'ggplot2' to run this benchmark.")
+}
+```
+
 ## Picking a method
 
 - `"mclust"`: fastest path; great default for parameter counts in the

@@ -15,18 +15,16 @@ test_that("reconstruct_brmsfit input validation", {
 })
 
 test_that("compress_brmsfit + reconstruct_brmsfit (integration)", {
-  skip_on_cran()
-  skip_if_not_installed("brms")
-  skip_if_not_installed("cmdstanr")
-  skip_if_not_installed("posterior")
-
-  tryCatch(cmdstanr::cmdstan_path(), error = function(e) skip("cmdstan not installed"))
+  expect_true(requireNamespace("brms", quietly = TRUE))
+  expect_true(requireNamespace("cmdstanr", quietly = TRUE))
+  expect_true(requireNamespace("posterior", quietly = TRUE))
+  expect_no_error(cmdstanr::cmdstan_path())
 
   set.seed(1)
   dat <- data.frame(x = rnorm(40), y = NA_real_)
   dat$y <- 1 + 0.5 * dat$x + rnorm(40)
 
-  fit <- suppressMessages(suppressWarnings(brms::brm(
+  fit <- brms::brm(
     y ~ x,
     data = dat,
     chains = 2,
@@ -35,17 +33,20 @@ test_that("compress_brmsfit + reconstruct_brmsfit (integration)", {
     backend = "cmdstanr",
     refresh = 0,
     silent = 2
-  )))
-  skip_if_no_brms_cmdstanr(fit)
+  )
+  expect_no_error(ensure_brms_cmdstanr(fit))
 
-  res <- compress_brmsfit(fit, method = "mclust", n_components = 2,
-                          remove_csvs = FALSE)
+  res <- compress_brmsfit(fit, method = "mclust", n_components = 2)
   expect_named(res, c("compressed", "structure"))
   expect_s3_class(res$compressed, "posterior_compressed_mclust")
   expect_s3_class(res$structure, "brmsfit")
 
   recon <- reconstruct_brmsfit(res, n_draws = 400)
   expect_s3_class(recon, "brmsfit")
-  expect_true(!is.null(attr(recon, "regenerated_draws")))
+  expect_true(methods::is(recon$fit, "stanfit"))
+  expect_true(length(recon$fit@sim$samples) > 0L)
+  expect_true(length(recon$fit@sim$samples[[1]][["b_Intercept"]]) > 0L)
+  draws_mat <- posterior::as_draws_matrix(recon)
+  expect_true(nrow(draws_mat) > 0L)
   expect_equal(attr(recon, "compression_method"), "mclust")
 })

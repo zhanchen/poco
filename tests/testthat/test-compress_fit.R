@@ -4,12 +4,8 @@ test_that("compress_fit rejects non-fit / non-character inputs", {
 })
 
 test_that("compress_fit reads cmdstan CSVs (smoke test)", {
-  skip_if_not_installed("cmdstanr")
-  skip_on_cran()
-
-  tryCatch(cmdstanr::cmdstan_path(), error = function(e) {
-    skip("cmdstan not installed")
-  })
+  expect_true(requireNamespace("cmdstanr", quietly = TRUE))
+  expect_no_error(cmdstanr::cmdstan_path())
 
   stan_code <- "
 data { int<lower=1> N; vector[N] y; }

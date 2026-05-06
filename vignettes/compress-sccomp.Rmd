@@ -14,37 +14,45 @@ knitr::opts_chunk$set(
   collapse = TRUE,
   comment  = "#>",
   fig.width  = 7,
-  fig.height = 4,
-  eval = FALSE
+  fig.height = 4
 )
 ```
 
 This vignette walks through compressing an `sccomp` fit, saving the
 compressed posterior, and reconstructing an analysis-ready object.
-Chunks are not evaluated by default because they require a working
-`sccomp` + `cmdstanr` setup.
+It requires a working `sccomp` + `cmdstanr` setup.
 
-```{r libs, eval = TRUE}
+```{r libs}
 library(poco)
 ```
 
 ## Fit a sccomp model
 
 `compress_sccomp()` expects an `sccomp` object that carries the
-underlying `cmdstanr` fit in `attr(x, "fit")`.
+underlying `cmdstanr` fit in `attr(x, "fit")`. Here we use the
+`counts_obj` example dataset shipped with `sccomp`.
 
 ```{r fit_sccomp}
 library(sccomp)
 library(dplyr)
 
-# Replace this with your own data and formula.
-fit <- sccomp_glm(
-  data                = your_data,
-  formula_composition = ~ condition,
-  .sample             = sample,
-  .cell_group         = cell_group,
-  .count              = count
-)
+data("counts_obj", package = "sccomp")
+draws_dir <- file.path(tempdir(), "sccomp_draws_files")
+dir.create(draws_dir, recursive = TRUE, showWarnings = FALSE)
+
+fit <-
+  counts_obj |>
+  sccomp_estimate(
+    formula_composition = ~ type,
+    sample              = "sample",
+    cell_group          = "cell_group",
+    abundance           = "count",
+    inference_method    = "hmc",
+    portable            = FALSE,
+    output_directory    = draws_dir,
+    cores               = 1,
+    verbose             = FALSE
+  )
 ```
 
 ## Compress and save
@@ -57,24 +65,19 @@ fit <- sccomp_glm(
 ```{r compress}
 result <- compress_sccomp(
   fit,
-  method       = "mclust",
-  n_components = 5,
-  remove_csvs  = FALSE
+  method       = "mvdens_gmm",
+  n_components = 8
 )
-
-saveRDS(result$compressed, "sccomp_compressed.rds", compress = "xz")
-saveRDS(result$structure,  "sccomp_structure.rds")
 ```
+
+Here we keep `portable = FALSE` and set an explicit `output_directory`,
+so cmdstanr CSV files remain available and `compress_sccomp()` can read
+all posterior parameters.
 
 ## Reconstruct and continue
 
 ```{r reconstruct}
-result_loaded <- list(
-  compressed = readRDS("sccomp_compressed.rds"),
-  structure  = readRDS("sccomp_structure.rds")
-)
-
-fit_recon <- reconstruct_sccomp(result_loaded)
+fit_recon <- reconstruct_sccomp(result)
 
 fit_recon
 ```
@@ -82,24 +85,24 @@ fit_recon
 ## Compare pairwise posterior geometry
 
 Use `bayesplot::mcmc_pairs()` to compare pairwise structure before and
-after reconstruction.
+after reconstruction. The original draws come from the `cmdstanr` fit
+attached to the `sccomp` object; the reconstructed draws are the
+regenerated samples stored on the reconstructed object.
 
 ```{r pairs}
 library(bayesplot)
 
 fit_cmdstan <- attr(fit, "fit")
-fit_recon_cmdstan <- attr(fit_recon, "fit")
 
-all_pars <- fit_cmdstan$variables()
-pair_pars <- head(all_pars[!grepl("__", all_pars)], 4)
-if (length(pair_pars) < 2) {
-  pair_pars <- head(all_pars, min(4, length(all_pars)))
-}
+regen_samples <- attr(fit_recon, "fit_compressed")$regenerated_samples
+pair_pars <- head(colnames(regen_samples), 4)
 
-draws_orig <- fit_cmdstan$draws(variables = pair_pars, format = "draws_array")
-draws_recon <- fit_recon_cmdstan$draws(variables = pair_pars, format = "draws_array")
+draws_orig  <- fit_cmdstan$draws(variables = pair_pars, format = "draws_array")
+draws_recon <- posterior::as_draws_array(
+  regen_samples[, pair_pars, drop = FALSE]
+)
 
-bayesplot::mcmc_pairs(draws_orig, pars = pair_pars)
+bayesplot::mcmc_pairs(draws_orig,  pars = pair_pars)
 bayesplot::mcmc_pairs(draws_recon, pars = pair_pars)
 ```
 
@@ -116,7 +119,7 @@ compression_methods()
 
 result_kde <- compress_sccomp(
   fit,
-  method = "mvdens_kde"
+  method    = "mvdens_kde"
 )
 ```
 

@@ -4,13 +4,13 @@
 \alias{reconstruct_sccomp}
 \title{Reconstruct an sccomp object from a compressed posterior}
 \usage{
-reconstruct_sccomp(x, n_draws = NULL)
+reconstruct_sccomp(x, n_draws = x$compressed$n_draws)
 }
 \arguments{
 \item{x}{The output of \code{\link[=compress_sccomp]{compress_sccomp()}}.}
 
-\item{n_draws}{Integer number of samples to regenerate. If \code{NULL},
-uses the original number of draws.}
+\item{n_draws}{Integer number of samples to regenerate. Defaults to
+the number of draws stored in the compressed posterior.}
 }
 \value{
 The sccomp object with \code{attr(x, "fit_compressed")} populated.

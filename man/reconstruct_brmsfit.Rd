@@ -4,15 +4,15 @@
 \alias{reconstruct_brmsfit}
 \title{Reconstruct a brms fit object from a compressed posterior}
 \usage{
-reconstruct_brmsfit(x, n_draws = NULL)
+reconstruct_brmsfit(x, n_draws = get_n_draws_from_fit(x$structure))
 }
 \arguments{
 \item{x}{The output of \code{\link[=compress_brmsfit]{compress_brmsfit()}} (a list with \code{compressed}
 and \code{structure}), or a similarly-shaped list constructed from
 separately-saved objects.}
 
-\item{n_draws}{Integer number of samples to regenerate. If \code{NULL},
-uses the original number of draws.}
+\item{n_draws}{Integer number of samples to regenerate. Defaults to
+the original number of draws stored in \code{x$structure}.}
 }
 \value{
 A \code{brmsfit} object with regenerated draws.

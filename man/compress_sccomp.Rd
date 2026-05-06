@@ -9,7 +9,7 @@ compress_sccomp(
   method = c("mclust", "mvdens_gmm", "mvdens_kde"),
   variables = NULL,
   n_components = 3L,
-  model_name = "VVV",
+  model_name = NULL,
   verbose = FALSE,
   remove_csvs = FALSE,
   ...
@@ -28,8 +28,12 @@ If \code{NULL} (default) all columns are used.}
 \item{n_components}{Integer number of mixture components (used by
 \code{"mclust"} and \code{"mvdens_gmm"}). Default \code{3}.}
 
-\item{model_name}{\code{mclust} covariance structure (e.g. \code{"VVV"}, \code{"EEE"}).
-Ignored by other methods. Default \code{"VVV"}.}
+\item{model_name}{\code{mclust} covariance structure (e.g. \code{"VVV"}, \code{"EEE"},
+or a vector of allowed model names). Ignored by other methods.
+When \code{NULL} (default) \code{poco} auto-selects a sensible set: the
+spherical and diagonal models \code{c("EII", "VII", "EEI", "EVI", "VEI", "VVI")} are used when \code{nrow(draws) <= ncol(draws)} so covariances
+remain identifiable, otherwise mclust's full default set is used
+and BIC picks the best.}
 
 \item{verbose}{Logical; print backend progress. Default \code{FALSE}.}
 

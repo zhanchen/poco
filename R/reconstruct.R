@@ -10,71 +10,95 @@
 #' @param x The output of [compress_brmsfit()] (a list with `compressed`
 #'   and `structure`), or a similarly-shaped list constructed from
 #'   separately-saved objects.
-#' @param n_draws Integer number of samples to regenerate. If `NULL`,
-#'   uses the original number of draws.
+#' @param n_draws Integer number of samples to regenerate. Defaults to
+#'   the original number of draws stored in `x$structure`.
 #'
 #' @return A `brmsfit` object with regenerated draws.
 #' @export
-reconstruct_brmsfit <- function(x, n_draws = NULL) {
+reconstruct_brmsfit <- function(x, n_draws = get_n_draws_from_fit(x$structure)) {
   .check_reconstruct_input(x)
   comp <- x$compressed
-  fit  <- x$structure
+  fit_structure <- x$structure
 
-  if (!inherits(fit, "brmsfit")) {
+  if (!inherits(fit_structure, "brmsfit")) {
     stop("`x$structure` must be a brmsfit object.", call. = FALSE)
   }
-  if (!requireNamespace("posterior", quietly = TRUE)) {
+  sf <- fit_structure$fit
+  if (is.null(sf) || !methods::is(sf, "stanfit") || is.null(sf@sim)) {
     stop(
-      "Package 'posterior' is required to reconstruct brms fits.",
+      "`x$structure$fit` is not a stanfit; cannot reconstruct.",
       call. = FALSE
     )
   }
 
-  original_draws <- posterior::as_draws_array(fit)
-  n_chains <- posterior::nchains(original_draws)
-  n_iter   <- posterior::niterations(original_draws)
-  if (is.null(n_draws)) n_draws <- n_chains * n_iter
+  fnames   <- sf@sim$fnames_oi
+  n_chains <- length(sf@sim$samples)
 
-  param_names <- posterior::variables(fit)
   samples <- sample_posterior(comp, n_draws = n_draws)
-
-  common <- intersect(param_names, colnames(samples))
-  if (length(common) < length(param_names)) {
-    .message(
-      "Some parameters were not in the compressed posterior and will be ",
-      "missing from the reconstructed fit (",
-      length(param_names) - length(common), " of ", length(param_names), ")."
+  missing_params <- setdiff(fnames, colnames(samples))
+  if (length(missing_params)) {
+    stop(
+      "The reconstructed fit needs draws for parameters that are not in ",
+      "the compressed posterior:\n  ",
+      paste(missing_params, collapse = ", "),
+      "\n  Re-run compress_brmsfit() without restricting `variables`.",
+      call. = FALSE
     )
   }
-  samples <- samples[, common, drop = FALSE]
 
   per_chain <- floor(n_draws / n_chains)
   used <- per_chain * n_chains
-  samples <- samples[seq_len(used), , drop = FALSE]
+  samples <- samples[seq_len(used), fnames, drop = FALSE]
 
-  arr <- array(
-    dim = c(per_chain, n_chains, length(common)),
-    dimnames = list(
-      iteration = seq_len(per_chain),
-      chain     = seq_len(n_chains),
-      variable  = common
-    )
-  )
   for (chain in seq_len(n_chains)) {
     rows <- ((chain - 1L) * per_chain + 1L):(chain * per_chain)
-    arr[, chain, ] <- samples[rows, , drop = FALSE]
+    sf@sim$samples[[chain]] <- as.list(
+      as.data.frame(samples[rows, , drop = FALSE])
+    )
   }
-  regenerated_draws <- posterior::as_draws_array(arr)
 
-  fit_recon <- fit
-  if (!is.null(fit_recon$fit) && inherits(fit_recon$fit, "CmdStanMCMC")) {
-    fit_recon$fit <- NULL
-  }
-  attr(fit_recon, "regenerated_draws")  <- regenerated_draws
+  sf@sim$iter    <- per_chain
+  sf@sim$warmup  <- 0L
+  sf@sim$thin    <- 1L
+  sf@sim$n_save  <- rep(per_chain, n_chains)
+  sf@sim$warmup2 <- rep(0L, n_chains)
+
+  fit_recon <- fit_structure
+  fit_recon$fit <- sf
   attr(fit_recon, "compression_method") <- comp$method
   attr(fit_recon, "reconstructed")      <- TRUE
 
   fit_recon
+}
+
+
+#' Default number of regenerated draws inferred from a fit's stanfit shell.
+#'
+#' Used as the default for `n_draws` in [reconstruct_brmsfit()] and
+#' [reconstruct_sccomp()] so callers don't have to supply a magic number.
+#' Falls back to `4000` when no MCMC metadata is present.
+#'
+#' @param fit_structure A `brmsfit` (or any object with `attr(., "fit")`
+#'   pointing to a `stanfit` / `CmdStanMCMC`).
+#' @return An integer number of post-warmup draws across all chains.
+#' @export
+get_n_draws_from_fit <- function(fit_structure) {
+  sf <- if (inherits(fit_structure, "brmsfit")) {
+    fit_structure$fit
+  } else {
+    attr(fit_structure, "fit")
+  }
+  if (!is.null(sf) && methods::is(sf, "stanfit") && !is.null(sf@sim)) {
+    n_chains <- length(sf@sim$samples)
+    per_chain <- as.integer(sf@sim$iter - sf@sim$warmup)[[1L]]
+    if (!is.na(per_chain) && per_chain > 0L) {
+      return(n_chains * per_chain)
+    }
+  }
+  if (!is.null(sf) && inherits(sf, "CmdStanMCMC")) {
+    return(as.integer(sf$num_chains() * sf$metadata()$iter_sampling))
+  }
+  4000L
 }
 
 
@@ -84,17 +108,16 @@ reconstruct_brmsfit <- function(x, n_draws = NULL) {
 #' `attr(x, "fit_compressed")`. The original `attr(x, "fit")` is removed.
 #'
 #' @param x The output of [compress_sccomp()].
-#' @param n_draws Integer number of samples to regenerate. If `NULL`,
-#'   uses the original number of draws.
+#' @param n_draws Integer number of samples to regenerate. Defaults to
+#'   the number of draws stored in the compressed posterior.
 #'
 #' @return The sccomp object with `attr(x, "fit_compressed")` populated.
 #' @export
-reconstruct_sccomp <- function(x, n_draws = NULL) {
+reconstruct_sccomp <- function(x, n_draws = x$compressed$n_draws) {
   .check_reconstruct_input(x)
   comp <- x$compressed
   obj  <- x$structure
 
-  if (is.null(n_draws)) n_draws <- comp$n_draws
   samples <- sample_posterior(comp, n_draws = n_draws)
 
   attr(obj, "fit") <- NULL

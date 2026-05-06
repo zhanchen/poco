@@ -30,6 +30,7 @@ Suggests:
     brms,
     sccomp,
     mvdens,
+    microbenchmark,
     ggplot2,
     ggside,
     patchwork,

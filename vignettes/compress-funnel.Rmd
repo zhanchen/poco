@@ -14,8 +14,7 @@ knitr::opts_chunk$set(
   collapse = TRUE,
   comment  = "#>",
   fig.width  = 7,
-  fig.height = 4,
-  eval = FALSE
+  fig.height = 4
 )
 ```
 
@@ -23,9 +22,9 @@ This vignette compresses Neal's funnel posterior (a classic stress test
 because of the strong dependency between `y` and `x`) with `compress_fit()`,
 then regenerates samples and inspects the approximation.
 
-It is not evaluated by default because it needs a working CmdStan install.
+It requires a working CmdStan install.
 
-```{r libs, eval = TRUE}
+```{r libs}
 library(poco)
 ```
 

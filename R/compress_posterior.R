@@ -19,8 +19,13 @@
 #'   If `NULL` (default) all columns are used.
 #' @param n_components Integer number of mixture components (used by
 #'   `"mclust"` and `"mvdens_gmm"`). Default `3`.
-#' @param model_name `mclust` covariance structure (e.g. `"VVV"`, `"EEE"`).
-#'   Ignored by other methods. Default `"VVV"`.
+#' @param model_name `mclust` covariance structure (e.g. `"VVV"`, `"EEE"`,
+#'   or a vector of allowed model names). Ignored by other methods.
+#'   When `NULL` (default) `poco` auto-selects a sensible set: the
+#'   spherical and diagonal models `c("EII", "VII", "EEI", "EVI", "VEI",
+#'   "VVI")` are used when `nrow(draws) <= ncol(draws)` so covariances
+#'   remain identifiable, otherwise mclust's full default set is used
+#'   and BIC picks the best.
 #' @param verbose Logical; print backend progress. Default `FALSE`.
 #' @param ... Additional arguments forwarded to the backend (e.g.
 #'   [mclust::Mclust()]).
@@ -47,7 +52,7 @@ compress_posterior <- function(
     method = c("mclust", "mvdens_gmm", "mvdens_kde"),
     variables = NULL,
     n_components = 3L,
-    model_name = "VVV",
+    model_name = NULL,
     verbose = FALSE,
     ...) {
   method <- .match_method(method)
@@ -108,7 +113,7 @@ compress_fit <- function(
     method = c("mclust", "mvdens_gmm", "mvdens_kde"),
     variables = NULL,
     n_components = 3L,
-    model_name = "VVV",
+    model_name = NULL,
     verbose = FALSE,
     remove_csvs = FALSE,
     ...) {
@@ -167,11 +172,12 @@ compress_fit <- function(
 #' reconstructed later via [reconstruct_brmsfit()].
 #'
 #' Requires the `brms` model to have been fit with `backend = "cmdstanr"`.
+#' Draws are extracted via `posterior::as_draws_matrix()`, so brms's
+#' user-facing parameter names (e.g. `b_x`, `sd_group__Intercept`) are
+#' preserved.
 #'
 #' @param brmsfit A `brms::brmsfit` object using the cmdstanr backend.
 #' @inheritParams compress_posterior
-#' @param remove_csvs Logical; if `TRUE`, delete the cmdstan CSV files
-#'   after compression. Default `FALSE`.
 #'
 #' @return A list with two elements:
 #'   \describe{
@@ -199,43 +205,78 @@ compress_brmsfit <- function(
     method = c("mclust", "mvdens_gmm", "mvdens_kde"),
     variables = NULL,
     n_components = 3L,
-    model_name = "VVV",
+    model_name = NULL,
     verbose = FALSE,
-    remove_csvs = FALSE,
     ...) {
   method <- .match_method(method)
 
   if (!inherits(brmsfit, "brmsfit")) {
     stop("Input must be a brmsfit object.", call. = FALSE)
   }
-  if (is.null(brmsfit$fit) || !inherits(brmsfit$fit, "CmdStanMCMC")) {
+  if (!identical(brmsfit$backend, "cmdstanr")) {
     stop(
       "brms fit must use the cmdstanr backend.\n",
       "  Refit with: brms::brm(..., backend = 'cmdstanr')",
       call. = FALSE
     )
   }
-
-  if (is.null(variables)) {
-    if (requireNamespace("posterior", quietly = TRUE)) {
-      variables <- posterior::variables(brmsfit)
-    } else {
-      variables <- colnames(brmsfit$fit$draws(format = "matrix"))
-    }
+  if (is.null(brmsfit$fit)) {
+    stop("brmsfit object has no `$fit` slot.", call. = FALSE)
+  }
+  if (!requireNamespace("posterior", quietly = TRUE)) {
+    stop(
+      "Package 'posterior' is required to compress brms fits.",
+      call. = FALSE
+    )
   }
 
-  comp <- compress_fit(
-    brmsfit$fit,
+  draws_mat <- as.matrix(posterior::as_draws_matrix(brmsfit))
+  if (!is.null(variables)) {
+    missing_vars <- setdiff(variables, colnames(draws_mat))
+    if (length(missing_vars)) {
+      stop(
+        "The following variables are not in the brms posterior: ",
+        paste(missing_vars, collapse = ", "),
+        call. = FALSE
+      )
+    }
+    draws_mat <- draws_mat[, variables, drop = FALSE]
+  }
+  storage.mode(draws_mat) <- "double"
+
+  comp <- compress_posterior(
+    draws_mat,
     method = method,
-    variables = variables,
     n_components = n_components,
     model_name = model_name,
     verbose = verbose,
-    remove_csvs = remove_csvs,
     ...
   )
 
-  list(compressed = comp, structure = brmsfit)
+  structure_obj <- .strip_brmsfit_draws(brmsfit)
+
+  list(compressed = comp, structure = structure_obj)
+}
+
+
+#' Strip the heavy stanfit draws from a brmsfit, keeping the shell so
+#' [reconstruct_brmsfit()] can refill `@sim$samples` later.
+#' @keywords internal
+#' @noRd
+.strip_brmsfit_draws <- function(brmsfit) {
+  sf <- brmsfit$fit
+  if (is.null(sf) || !methods::is(sf, "stanfit") || is.null(sf@sim)) {
+    return(brmsfit)
+  }
+  for (chain in seq_along(sf@sim$samples)) {
+    sf@sim$samples[[chain]] <- lapply(sf@sim$samples[[chain]], function(x) {
+      numeric(0L)
+    })
+  }
+  sf@sim$n_save  <- rep(0L, length(sf@sim$samples))
+  sf@sim$warmup2 <- rep(0L, length(sf@sim$samples))
+  brmsfit$fit <- sf
+  brmsfit
 }
 
 
@@ -262,7 +303,7 @@ compress_sccomp <- function(
     method = c("mclust", "mvdens_gmm", "mvdens_kde"),
     variables = NULL,
     n_components = 3L,
-    model_name = "VVV",
+    model_name = NULL,
     verbose = FALSE,
     remove_csvs = FALSE,
     ...) {

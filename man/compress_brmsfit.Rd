@@ -9,9 +9,8 @@ compress_brmsfit(
   method = c("mclust", "mvdens_gmm", "mvdens_kde"),
   variables = NULL,
   n_components = 3L,
-  model_name = "VVV",
+  model_name = NULL,
   verbose = FALSE,
-  remove_csvs = FALSE,
   ...
 )
 }
@@ -27,13 +26,14 @@ If \code{NULL} (default) all columns are used.}
 \item{n_components}{Integer number of mixture components (used by
 \code{"mclust"} and \code{"mvdens_gmm"}). Default \code{3}.}
 
-\item{model_name}{\code{mclust} covariance structure (e.g. \code{"VVV"}, \code{"EEE"}).
-Ignored by other methods. Default \code{"VVV"}.}
+\item{model_name}{\code{mclust} covariance structure (e.g. \code{"VVV"}, \code{"EEE"},
+or a vector of allowed model names). Ignored by other methods.
+When \code{NULL} (default) \code{poco} auto-selects a sensible set: the
+spherical and diagonal models \code{c("EII", "VII", "EEI", "EVI", "VEI", "VVI")} are used when \code{nrow(draws) <= ncol(draws)} so covariances
+remain identifiable, otherwise mclust's full default set is used
+and BIC picks the best.}
 
 \item{verbose}{Logical; print backend progress. Default \code{FALSE}.}
-
-\item{remove_csvs}{Logical; if \code{TRUE}, delete the cmdstan CSV files
-after compression. Default \code{FALSE}.}
 
 \item{...}{Additional arguments forwarded to the backend (e.g.
 \code{\link[mclust:Mclust]{mclust::Mclust()}}).}
@@ -54,6 +54,9 @@ reconstructed later via \code{\link[=reconstruct_brmsfit]{reconstruct_brmsfit()}
 }
 \details{
 Requires the \code{brms} model to have been fit with \code{backend = "cmdstanr"}.
+Draws are extracted via \code{posterior::as_draws_matrix()}, so brms's
+user-facing parameter names (e.g. \code{b_x}, \code{sd_group__Intercept}) are
+preserved.
 }
 \examples{
 \dontrun{
