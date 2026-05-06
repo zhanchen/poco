@@ -1,0 +1,103 @@
+---
+title: "Compressing sccomp posteriors"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+vignette: >
+  %\VignetteIndexEntry{Compressing sccomp posteriors}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment  = "#>",
+  fig.width  = 7,
+  fig.height = 4,
+  eval = FALSE
+)
+```
+
+This vignette walks through compressing an `sccomp` fit, saving the
+compressed posterior, and reconstructing an analysis-ready object.
+Chunks are not evaluated by default because they require a working
+`sccomp` + `cmdstanr` setup.
+
+```{r libs, eval = TRUE}
+library(poco)
+```
+
+## Fit a sccomp model
+
+`compress_sccomp()` expects an `sccomp` object that carries the
+underlying `cmdstanr` fit in `attr(x, "fit")`.
+
+```{r fit_sccomp}
+library(sccomp)
+library(dplyr)
+
+# Replace this with your own data and formula.
+fit <- sccomp_glm(
+  data                = your_data,
+  formula_composition = ~ condition,
+  .sample             = sample,
+  .cell_group         = cell_group,
+  .count              = count
+)
+```
+
+## Compress and save
+
+`compress_sccomp()` returns a list with two parts:
+
+- `compressed`: compact posterior representation
+- `structure`: the original `sccomp` object, used during reconstruction
+
+```{r compress}
+result <- compress_sccomp(
+  fit,
+  method       = "mclust",
+  n_components = 5,
+  remove_csvs  = FALSE
+)
+
+saveRDS(result$compressed, "sccomp_compressed.rds", compress = "xz")
+saveRDS(result$structure,  "sccomp_structure.rds")
+```
+
+## Reconstruct and continue
+
+```{r reconstruct}
+result_loaded <- list(
+  compressed = readRDS("sccomp_compressed.rds"),
+  structure  = readRDS("sccomp_structure.rds")
+)
+
+fit_recon <- reconstruct_sccomp(result_loaded)
+
+fit_recon
+```
+
+MCMC diagnostics (`Rhat`, ESS) are *not* preserved by the regenerated
+draws.
+
+## Other methods
+
+`compress_sccomp()` shares the same `method` argument as
+`compress_posterior()`:
+
+```{r methods}
+compression_methods()
+
+result_kde <- compress_sccomp(
+  fit,
+  method = "mvdens_kde"
+)
+```
+
+## Session info
+
+```{r si, eval = TRUE}
+sessionInfo()
+```

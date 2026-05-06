@@ -1,0 +1,128 @@
+---
+title: "Comparing compression methods"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+vignette: >
+  %\VignetteIndexEntry{Comparing compression methods}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment  = "#>",
+  fig.width  = 7,
+  fig.height = 4
+)
+```
+
+`poco` exposes a single `method` argument to switch between density
+approximations. This vignette compares the available backends on a
+small synthetic posterior so you can pick the right trade-off for your
+problem.
+
+```{r libs}
+library(poco)
+library(mvtnorm)
+```
+
+## Available methods
+
+```{r methods}
+compression_methods()
+```
+
+| `method`        | Backend                    | Notes |
+| --------------- | -------------------------- | ----- |
+| `"mclust"`      | `mclust::Mclust()`         | parametric GMM, BIC-based selection, fast & compact |
+| `"mvdens_gmm"`  | `mvdens::fit.gmm()`        | EM-based GMM, requires the suggested `mvdens` package |
+| `"mvdens_kde"`  | `mvdens::fit.kde()`        | kernel density estimate, larger but non-parametric |
+
+## A toy posterior with correlated parameters
+
+```{r toy}
+set.seed(1)
+n_per <- 2000
+draws <- rbind(
+  mvtnorm::rmvnorm(n_per, mean = c(-2, -1),
+                   sigma = matrix(c(0.5,  0.1,  0.1, 0.3), 2)),
+  mvtnorm::rmvnorm(n_per, mean = c( 2,  1),
+                   sigma = matrix(c(0.4, -0.2, -0.2, 0.6), 2))
+)
+colnames(draws) <- c("alpha", "beta")
+```
+
+## Compress with each method
+
+`mvdens_*` methods require the suggested `mvdens` package; we skip them
+gracefully when it is not installed.
+
+```{r compress}
+methods_to_try <- c("mclust")
+if (requireNamespace("mvdens", quietly = TRUE)) {
+  methods_to_try <- c(methods_to_try, "mvdens_gmm", "mvdens_kde")
+}
+
+fits <- lapply(methods_to_try, function(m) {
+  compress_posterior(draws, method = m, n_components = 2)
+})
+names(fits) <- methods_to_try
+```
+
+## Storage footprint
+
+A practical proxy for "how small does it get on disk":
+
+```{r footprint}
+sizes <- sapply(fits, function(f) {
+  tf <- tempfile(fileext = ".rds")
+  saveRDS(f, tf, compress = "xz")
+  on.exit(unlink(tf), add = TRUE)
+  file.size(tf)
+})
+
+original <- as.numeric(object.size(draws))
+data.frame(
+  method        = names(sizes),
+  bytes         = sizes,
+  ratio_to_raw  = round(original / sizes, 1)
+)
+```
+
+## Sample regeneration
+
+All methods support [sample_posterior()] with the same interface:
+
+```{r regenerate}
+regen <- lapply(fits, sample_posterior, n_draws = 2000)
+
+sapply(regen, function(s) {
+  c(mean_alpha = mean(s[, "alpha"]),
+    mean_beta  = mean(s[, "beta"]),
+    cor        = cor(s[, "alpha"], s[, "beta"]))
+})
+```
+
+## Density evaluation
+
+```{r density}
+test_pts <- rbind(c(-2, -1), c(0, 0), c(2, 1))
+
+sapply(fits, function(f) density_posterior(f, test_pts))
+```
+
+## Picking a method
+
+- `"mclust"`: fastest path; great default for parameter counts in the
+  hundreds to low thousands.
+- `"mvdens_gmm"`: alternative EM-based GMM, useful for cross-checks.
+- `"mvdens_kde"`: non-parametric, larger storage footprint, useful when
+  the posterior is far from a mixture of Gaussians.
+
+## Session info
+
+```{r si}
+sessionInfo()
+```

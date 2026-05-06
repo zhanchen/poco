@@ -119,12 +119,16 @@ new_draws <- sample_posterior(comp, n_draws = 4000)
 
 ## Vignettes
 
-- `vignette("introduction", package = "poco")` - Hello world,
+- `vignette("introduction", package = "poco")` - hello world,
   matrix in / samples out.
 - `vignette("compress-brms", package = "poco")` - end-to-end
-  brms workflow, including reconstruction.
-- `vignette("compress-funnel", package = "poco")` - cmdstanr
+  `brms` workflow, including reconstruction.
+- `vignette("compress-funnel", package = "poco")` - `cmdstanr`
   workflow on Neal's funnel.
+- `vignette("compress-sccomp", package = "poco")` - end-to-end
+  `sccomp` workflow.
+- `vignette("methods-benchmark", package = "poco")` - side-by-side
+  comparison of the supported compression methods.
 
 ## License
 

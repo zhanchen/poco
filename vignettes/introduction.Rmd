@@ -23,9 +23,11 @@ draws matrix into a compact density approximation, then drawing fresh
 samples or evaluating the density on demand.
 
 This vignette shows the matrix-in / samples-out workflow on a synthetic
-two-component example. See `vignette("compress-brms")` and
-`vignette("compress-funnel")` for end-to-end workflows on real `brms` and
-`cmdstanr` fits.
+two-component example. See `vignette("compress-brms")`,
+`vignette("compress-funnel")`, and `vignette("compress-sccomp")` for
+end-to-end workflows on real `brms`, `cmdstanr`, and `sccomp` fits, and
+`vignette("methods-benchmark")` for a side-by-side comparison of the
+available compression backends.
 
 ```{r libs}
 library(poco)
@@ -119,10 +121,14 @@ unlink(tf)
 
 ## Where to next
 
-- `vignette("compress-brms", package = "poco")` for a
-  full `brms::brmsfit` round-trip including reconstruction.
-- `vignette("compress-funnel", package = "poco")` for a
-  cmdstanr workflow on Neal's funnel.
+- `vignette("compress-brms", package = "poco")` - full
+  `brms::brmsfit` round-trip, including reconstruction.
+- `vignette("compress-funnel", package = "poco")` - cmdstanr
+  workflow on Neal's funnel.
+- `vignette("compress-sccomp", package = "poco")` - end-to-end
+  `sccomp` workflow.
+- `vignette("methods-benchmark", package = "poco")` - side-by-side
+  comparison of the supported compression methods.
 
 ## Session info
 

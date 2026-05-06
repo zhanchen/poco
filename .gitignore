@@ -12,3 +12,5 @@ docs
 *.rds
 *.csv
 cmdstanr_draws/
+/doc/
+/Meta/
