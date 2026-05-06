@@ -100,6 +100,9 @@ print.posterior_compressed <- function(x, ...) {
   if (!is.null(x$model_name)) {
     cat(" mclust model: ", x$model_name, "\n", sep = "")
   }
+  if (!is.null(x$covariance_type)) {
+    cat(" covariance type: ", x$covariance_type, "\n", sep = "")
+  }
   if (!is.null(x$bic)) {
     cat(" BIC: ", round(x$bic, 2), "\n", sep = "")
   }

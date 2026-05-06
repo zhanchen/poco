@@ -111,3 +111,61 @@ test_that("default S3 methods error helpfully on wrong class", {
   expect_error(sample_posterior(list()), "No sample_posterior")
   expect_error(density_posterior(list(), matrix(1)), "No density_posterior")
 })
+
+test_that("axis-aligned mclust models are stored as diagonal covariances", {
+  draws <- make_two_blob_draws()
+  comp <- compress_posterior(
+    draws,
+    method = "mclust",
+    n_components = 2,
+    model_name = "VVI"
+  )
+
+  expect_equal(comp$covariance_type, "diagonal")
+  expect_true(is.matrix(comp$covariances))
+  expect_equal(dim(comp$covariances), c(2L, comp$n_components))
+
+  set.seed(42)
+  s <- sample_posterior(comp, n_draws = 500)
+  expect_equal(dim(s), c(500L, 2L))
+  expect_equal(colnames(s), comp$param_names)
+  expect_true(all(is.finite(s)))
+
+  pts <- rbind(c(-2, -1), c(2, 1), c(0, 0))
+  d <- density_posterior(comp, pts)
+  expect_length(d, 3L)
+  expect_true(all(is.finite(d)) && all(d >= 0))
+
+  expect_equal(
+    density_posterior(comp, pts),
+    exp(density_posterior(comp, pts, log = TRUE)),
+    tolerance = 1e-8
+  )
+})
+
+test_that("diagonal storage matches a manually-built full covariance", {
+  draws <- make_two_blob_draws()
+  comp_diag <- compress_posterior(
+    draws,
+    method = "mclust",
+    n_components = 2,
+    model_name = "VVI"
+  )
+
+  d <- comp_diag$n_params
+  G <- comp_diag$n_components
+  full_arr <- array(0, dim = c(d, d, G))
+  for (k in seq_len(G)) {
+    full_arr[, , k] <- diag(comp_diag$covariances[, k], nrow = d)
+  }
+  comp_full <- comp_diag
+  comp_full$covariances <- full_arr
+  comp_full$covariance_type <- "full"
+
+  pts <- rbind(c(-2, -1), c(2, 1), c(0, 0), c(1.2, 0.4))
+  expect_equal(
+    density_posterior(comp_diag, pts),
+    density_posterior(comp_full, pts),
+    tolerance = 1e-10
+  )
+})

@@ -102,18 +102,21 @@
     stop("Unrecognised mclust covariance shape.", call. = FALSE)
   }
 
+  cov_storage <- .compact_covariances(cov_arr)
+
   out <- list(
-    method       = "mclust",
-    param_names  = param_names,
-    n_params     = d,
-    n_components = G,
-    weights      = fit$parameters$pro,
-    means        = means_mat,
-    covariances  = cov_arr,
-    n_draws      = nrow(draws_mat),
-    model_name   = fit$modelName,
-    loglik       = fit$loglik,
-    bic          = fit$bic
+    method          = "mclust",
+    param_names     = param_names,
+    n_params        = d,
+    n_components    = G,
+    weights         = fit$parameters$pro,
+    means           = means_mat,
+    covariances     = cov_storage$values,
+    covariance_type = cov_storage$type,
+    n_draws         = nrow(draws_mat),
+    model_name      = fit$modelName,
+    loglik          = fit$loglik,
+    bic             = fit$bic
   )
   class(out) <- c("posterior_compressed_mclust", "posterior_compressed", "list")
   out
@@ -125,6 +128,8 @@
 .sample_mclust <- function(comp, n_draws = NULL) {
   if (is.null(n_draws)) n_draws <- comp$n_draws
   n_draws <- as.integer(n_draws)
+
+  cov_type <- .resolve_covariance_type(comp)
 
   components <- sample.int(
     n = comp$n_components,
@@ -142,8 +147,18 @@
     if (nk == 0L) next
 
     mean_k <- comp$means[, k]
-    sigma_k <- .mclust_sigma(comp$covariances, k)
-    samples[idx, ] <- mvtnorm::rmvnorm(n = nk, mean = mean_k, sigma = sigma_k)
+
+    if (cov_type == "diagonal") {
+      # Each parameter independent: avoid building the d x d sigma entirely.
+      sd_k <- sqrt(comp$covariances[, k])
+      z <- matrix(stats::rnorm(nk * n_params), nrow = nk, ncol = n_params)
+      samples[idx, ] <- z *
+        matrix(sd_k,   nrow = nk, ncol = n_params, byrow = TRUE) +
+        matrix(mean_k, nrow = nk, ncol = n_params, byrow = TRUE)
+    } else {
+      sigma_k <- .mclust_sigma(comp, k, cov_type)
+      samples[idx, ] <- mvtnorm::rmvnorm(n = nk, mean = mean_k, sigma = sigma_k)
+    }
   }
 
   colnames(samples) <- comp$param_names
@@ -169,32 +184,107 @@
     )
   }
 
+  cov_type <- .resolve_covariance_type(comp)
+
   n_pts <- nrow(x)
+  d <- ncol(x)
   densities <- numeric(n_pts)
 
   for (k in seq_len(comp$n_components)) {
     weight_k <- comp$weights[k]
     mean_k <- comp$means[, k]
-    sigma_k <- .mclust_sigma(comp$covariances, k)
-    densities <- densities +
-      weight_k * mvtnorm::dmvnorm(x, mean = mean_k, sigma = sigma_k)
+
+    if (cov_type == "diagonal") {
+      # Independent normals: log p_k(x) = sum_j log dnorm(x[, j], mu_j, sd_j)
+      sd_k <- sqrt(comp$covariances[, k])
+      log_pk <- rowSums(stats::dnorm(
+        x,
+        mean = matrix(mean_k, nrow = n_pts, ncol = d, byrow = TRUE),
+        sd   = matrix(sd_k,   nrow = n_pts, ncol = d, byrow = TRUE),
+        log  = TRUE
+      ))
+      densities <- densities + weight_k * exp(log_pk)
+    } else {
+      sigma_k <- .mclust_sigma(comp, k, cov_type)
+      densities <- densities +
+        weight_k * mvtnorm::dmvnorm(x, mean = mean_k, sigma = sigma_k)
+    }
   }
 
   if (log) log(densities) else densities
 }
 
 
-#' Extract the kth covariance matrix regardless of mclust shape
+#' Detect whether mclust's d x d x G sigma is effectively diagonal across
+#' every component, and if so collapse to a d x G matrix of diagonals.
+#'
+#' This is what makes axis-aligned mclust models (`EII`/`VII`/`EEI`/
+#' `VEI`/`EVI`/`VVI`) usable as a high-dimensional compression: storage
+#' goes from `d^2 G` to `d G`.
+#'
+#' @return `list(values, type)` where `type` is one of `"full"`,
+#'   `"diagonal"`, or `"shared"`.
 #' @keywords internal
 #' @noRd
-.mclust_sigma <- function(cov_obj, k) {
-  if (is.array(cov_obj) && length(dim(cov_obj)) == 3L) {
-    cov_obj[, , k]
-  } else if (is.matrix(cov_obj)) {
-    cov_obj
-  } else {
-    stop("Unknown mclust covariance structure.", call. = FALSE)
+.compact_covariances <- function(sigma) {
+  if (is.null(sigma)) {
+    return(list(values = sigma, type = "full"))
   }
+  if (is.matrix(sigma)) {
+    # Single shared d x d covariance reused across components (legacy).
+    return(list(values = sigma, type = "shared"))
+  }
+  if (!is.array(sigma) || length(dim(sigma)) != 3L) {
+    return(list(values = sigma, type = "full"))
+  }
+  d <- dim(sigma)[1]
+  G <- dim(sigma)[3]
+  if (d <= 1L) {
+    return(list(values = sigma, type = "full"))
+  }
+  diag_mat <- matrix(NA_real_, nrow = d, ncol = G)
+  for (k in seq_len(G)) {
+    s_k <- sigma[, , k]
+    diag_k <- diag(s_k)
+    tol <- 1e-10 * max(1, max(abs(diag_k)))
+    off_max <- max(abs(s_k - diag(diag_k, nrow = d)))
+    if (off_max > tol) {
+      return(list(values = sigma, type = "full"))
+    }
+    diag_mat[, k] <- diag_k
+  }
+  list(values = diag_mat, type = "diagonal")
+}
+
+
+#' Resolve the covariance storage type of a compressed object,
+#' inferring from shape for legacy objects that lack `covariance_type`.
+#' @keywords internal
+#' @noRd
+.resolve_covariance_type <- function(comp) {
+  ct <- comp$covariance_type
+  if (!is.null(ct)) return(ct)
+  if (is.array(comp$covariances) && length(dim(comp$covariances)) == 3L) {
+    return("full")
+  }
+  if (is.matrix(comp$covariances)) {
+    return("shared")
+  }
+  stop("Unknown mclust covariance structure.", call. = FALSE)
+}
+
+
+#' Extract the kth covariance matrix regardless of mclust storage shape.
+#' @keywords internal
+#' @noRd
+.mclust_sigma <- function(comp, k, cov_type = .resolve_covariance_type(comp)) {
+  switch(
+    cov_type,
+    full     = comp$covariances[, , k],
+    shared   = comp$covariances,
+    diagonal = diag(comp$covariances[, k], nrow = nrow(comp$covariances)),
+    stop("Unknown mclust covariance_type: ", cov_type, call. = FALSE)
+  )
 }
 
 

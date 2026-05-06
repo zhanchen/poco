@@ -255,7 +255,7 @@ compress_brmsfit <- function(
 
   structure_obj <- .strip_brmsfit_draws(brmsfit)
 
-  list(compressed = comp, structure = structure_obj)
+  .new_compressed_fit(comp, structure_obj, kind = "brmsfit")
 }
 
 
@@ -338,7 +338,61 @@ compress_sccomp <- function(
   structure_obj <- sccomp_obj
   attr(structure_obj, "fit") <- NULL
 
-  list(compressed = comp, structure = structure_obj)
+  .new_compressed_fit(comp, structure_obj, kind = "sccomp")
+}
+
+
+#' Build a classed wrapper around a compressed posterior + fit structure
+#'
+#' Returns a list with `compressed` and `structure`, classed as
+#' `c("compressed_<kind>", "compressed_fit", "list")` so [print()] does
+#' not dispatch to e.g. `print.brmsfit` on the draws-stripped structure
+#' (which can fail).
+#' @keywords internal
+#' @noRd
+.new_compressed_fit <- function(compressed, structure_obj,
+                                kind = c("brmsfit", "sccomp")) {
+  kind <- match.arg(kind)
+  out <- list(compressed = compressed, structure = structure_obj)
+  class(out) <- c(paste0("compressed_", kind), "compressed_fit", "list")
+  out
+}
+
+
+#' Print method for `compressed_fit` wrappers
+#'
+#' Bypasses the auto-print of the (draws-stripped) `structure` element to
+#' keep `brms::print.brmsfit` from running on an empty stanfit.
+#'
+#' @param x A `compressed_fit` object from [compress_brmsfit()] or
+#'   [compress_sccomp()].
+#' @param ... Currently unused.
+#' @return Invisibly returns `x`.
+#' @export
+print.compressed_fit <- function(x, ...) {
+  kind <- if (inherits(x, "compressed_brmsfit")) {
+    "brmsfit"
+  } else if (inherits(x, "compressed_sccomp")) {
+    "sccomp"
+  } else {
+    "fit"
+  }
+  cat("<compressed_", kind, ">\n", sep = "")
+  cat("$compressed\n")
+  print(x$compressed)
+  cat("\n$structure\n")
+  cls <- class(x$structure)
+  recon <- if (kind == "brmsfit") "reconstruct_brmsfit()"
+           else if (kind == "sccomp") "reconstruct_sccomp()"
+           else NULL
+  cat(
+    "  <", paste(cls, collapse = "/"), "> ",
+    "(draws stripped",
+    if (!is.null(recon)) paste0(", use ", recon, " to rebuild") else "",
+    ")\n",
+    sep = ""
+  )
+  invisible(x)
 }
 
 
