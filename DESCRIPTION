@@ -19,11 +19,13 @@ LazyData: true
 Depends:
     R (>= 4.1.0)
 Imports:
+    instantiate (>= 0.2.3),
     mclust,
     mvtnorm,
     stats,
     utils,
-    cli
+    cli,
+    rlang
 Suggests:
     posterior,
     cmdstanr,
@@ -37,6 +39,7 @@ Suggests:
     knitr,
     rmarkdown,
     testthat (>= 3.0.0)
+SystemRequirements: CmdStan (https://mc-stan.org/users/interfaces/cmdstan)
 Additional_repositories:
     https://mc-stan.org/r-packages/
 Remotes:

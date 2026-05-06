@@ -1,0 +1,111 @@
+# Workflow derived from https://github.com/r-lib/actions/tree/v2/examples
+# Need help debugging build failures? Start at https://github.com/r-lib/actions#where-to-find-help
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+name: workflow_with_cmdstanr
+
+jobs:
+  workflow_with_cmdstanr:
+    runs-on: ${{ matrix.config.os }}
+
+    name: ${{ matrix.config.os }} (${{ matrix.config.r }})
+
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - {os: macos-latest,   r: 'release'}
+          - {os: windows-latest, r: 'release', rtools: '44'}
+          - {os: ubuntu-latest,  r: 'release'}
+          - {os: ubuntu-latest,  r: 'oldrel-1'}
+
+    env:
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+      R_KEEP_PKG_SOURCE: yes
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: r-lib/actions/setup-pandoc@v2
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: ${{ matrix.config.r }}
+          rtools-version: '44'
+          http-user-agent: ${{ matrix.config.http-user-agent }}
+          use-public-rspm: true
+
+      - name: Install R dependencies
+        shell: Rscript {0}
+        run: |
+          install.packages("SeuratObject")
+          if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager")
+          BiocManager::install()
+          if (!requireNamespace("remotes", quietly = TRUE)) install.packages("remotes")
+          remotes::install_deps(dependencies = TRUE)
+
+      - name: Install CmdStan  
+        shell: Rscript {0}
+        run: |
+          # TEMPORARY: Install cmdstanr from GitHub v0.9.0 for this branch
+          if (!requireNamespace("remotes", quietly = TRUE)) install.packages("remotes")
+          remotes::install_github("stan-dev/cmdstanr", ref = "v0.9.0")
+          # ORIGINAL CRAN INSTALLATION (commented out for temporary GitHub install):
+          # install.packages("cmdstanr", repos = c("https://mc-stan.org/r-packages/", getOption("repos")))
+          cmdstanr::check_cmdstan_toolchain(fix = TRUE)
+          cmdstanr::install_cmdstan(cores = 2)
+          cmdstanr::cmdstan_version()
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          dependencies: '"hard"' # do not install packages in Suggests
+          cache: false
+          extra-packages: |
+            any::rcmdcheck
+            any::knitr
+            any::rmarkdown
+            any::ragg
+            any::ggplot2
+            any::tibble
+            any::dplyr
+            any::prettydoc
+          needs: check
+
+      - uses: r-lib/actions/check-r-package@v2
+        with:
+          upload-snapshots: true
+
+      - name: Install pkgdown
+        if: matrix.config.os == 'ubuntu-latest' && matrix.config.r == 'release' && github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        shell: Rscript {0}
+        run: |
+          install.packages(c("pkgdown", "ragg"))
+
+      - name: Build pkgdown site
+        if: matrix.config.os == 'ubuntu-latest' && matrix.config.r == 'release' && github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        shell: Rscript {0}
+        run: |
+          pkgdown::build_site_github_pages(new_process = FALSE, install = TRUE)
+        env:
+          GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Clean up large draw files before deployment
+        if: matrix.config.os == 'ubuntu-latest' && matrix.config.r == 'release' && github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        run: |
+          # Remove large Stan draw CSV files that shouldn't be deployed
+          find docs -type f -name "*.csv" -size +10M -delete
+          echo "Cleaned up large CSV files from docs directory"
+
+      - name: Deploy to GitHub pages 🚀
+        if: matrix.config.os == 'ubuntu-latest' && matrix.config.r == 'release' && github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        uses: JamesIves/github-pages-deploy-action@v4.5.0
+        with:
+          clean: false
+          branch: gh-pages
+          folder: docs
+          

@@ -22,7 +22,16 @@ This vignette compresses Neal's funnel posterior (a classic stress test
 because of the strong dependency between `y` and `x`) with `compress_fit()`,
 then regenerates samples and inspects the approximation.
 
-It requires a working CmdStan install.
+It requires a working CmdStan install. The Stan-fitting chunks below are
+gated with `instantiate::stan_cmdstan_exists()`, so the vignette still
+builds on machines that do not have CmdStan installed (e.g. CI runners).
+Install CmdStan once with:
+
+```{r install-cmdstan, eval = FALSE}
+poco::check_and_install_cmdstanr()
+cmdstanr::check_cmdstan_toolchain(fix = TRUE)
+cmdstanr::install_cmdstan()
+```
 
 ```{r libs}
 library(poco)
@@ -30,7 +39,7 @@ library(poco)
 
 ## Fit the funnel model
 
-```{r fit_funnel}
+```{r fit_funnel, eval = instantiate::stan_cmdstan_exists()}
 library(cmdstanr)
 
 stan_code <- "
@@ -59,7 +68,7 @@ fit <- mod$sample(
 
 ## Compress
 
-```{r compress}
+```{r compress, eval = instantiate::stan_cmdstan_exists()}
 vars <- c("y", paste0("x[", 1:D, "]"))
 methods <- c("mclust", "mvdens_gmm", "mvdens_kde")
 
@@ -91,7 +100,7 @@ compress_status
 
 You can also pass the CSV files directly (example shown for `mclust`):
 
-```{r compress_csv}
+```{r compress_csv, eval = instantiate::stan_cmdstan_exists()}
 comp_csv <- compress_fit(
   fit$output_files(),
   variables    = vars,
@@ -103,7 +112,7 @@ comp_csv
 
 ## Regenerate samples and compare
 
-```{r regenerate}
+```{r regenerate, eval = instantiate::stan_cmdstan_exists()}
 draws_orig <- fit$draws(variables = vars, format = "matrix")
 draws_new_list <- lapply(comps, function(comp) {
   if (inherits(comp, "error")) return(comp)
@@ -133,7 +142,7 @@ mean_summary <- do.call(
 round(mean_summary, 3)
 ```
 
-```{r plots, message = FALSE, warning = FALSE}
+```{r plots, message = FALSE, warning = FALSE, eval = instantiate::stan_cmdstan_exists()}
 library(ggplot2)
 
 stacked <- do.call(
