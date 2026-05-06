@@ -61,47 +61,94 @@ fit <- mod$sample(
 
 ```{r compress}
 vars <- c("y", paste0("x[", 1:D, "]"))
-comp <- compress_fit(
-  fit,
-  variables    = vars,
-  method       = "mclust",
-  n_components = 5,
-  model_name   = "VVV"
+methods <- c("mclust", "mvdens_gmm", "mvdens_kde")
+
+comps <- lapply(methods, function(m) {
+  tryCatch(
+    compress_fit(
+      fit,
+      variables    = vars,
+      method       = m,
+      n_components = 5
+    ),
+    error = function(e) e
+  )
+})
+names(comps) <- methods
+
+compress_status <- data.frame(
+  method = methods,
+  ok = vapply(comps, function(x) !inherits(x, "error"), logical(1)),
+  message = vapply(
+    comps,
+    function(x) if (inherits(x, "error")) conditionMessage(x) else "ok",
+    character(1)
+  ),
+  row.names = NULL
 )
-comp
+compress_status
 ```
 
-You can also pass the CSV files directly:
+You can also pass the CSV files directly (example shown for `mclust`):
 
 ```{r compress_csv}
-comp <- compress_fit(
+comp_csv <- compress_fit(
   fit$output_files(),
   variables    = vars,
   method       = "mclust",
   n_components = 5
 )
+comp_csv
 ```
 
 ## Regenerate samples and compare
 
 ```{r regenerate}
 draws_orig <- fit$draws(variables = vars, format = "matrix")
-draws_new  <- sample_posterior(comp, n_draws = nrow(draws_orig))
+draws_new_list <- lapply(comps, function(comp) {
+  if (inherits(comp, "error")) return(comp)
+  tryCatch(
+    sample_posterior(comp, n_draws = nrow(draws_orig)),
+    error = function(e) e
+  )
+})
 
-round(rbind(
-  original     = colMeans(draws_orig),
-  regenerated  = colMeans(draws_new)
-), 3)
+regen_status <- data.frame(
+  method = names(draws_new_list),
+  ok = vapply(draws_new_list, function(x) !inherits(x, "error"), logical(1)),
+  message = vapply(
+    draws_new_list,
+    function(x) if (inherits(x, "error")) conditionMessage(x) else "ok",
+    character(1)
+  )
+)
+regen_status
+
+ok_draws <- draws_new_list[vapply(draws_new_list, function(x) !inherits(x, "error"), logical(1))]
+
+mean_summary <- do.call(
+  rbind,
+  c(list(original = colMeans(draws_orig)), lapply(ok_draws, colMeans))
+)
+round(mean_summary, 3)
 ```
 
 ```{r plots, message = FALSE, warning = FALSE}
 library(ggplot2)
 
-stacked <- rbind(
-  data.frame(draws_orig[, c("y", "x[1]")], source = "original",
-             check.names = FALSE),
-  data.frame(draws_new [, c("y", "x[1]")], source = "regenerated",
-             check.names = FALSE)
+stacked <- do.call(
+  rbind,
+  c(
+    list(data.frame(draws_orig[, c("y", "x[1]")], source = "original",
+                    check.names = FALSE)),
+    lapply(names(ok_draws), function(m) {
+      data.frame(
+        ok_draws[[m]][, c("y", "x[1]")],
+        source = m,
+        check.names = FALSE
+      )
+    })
+  )
 )
 
 p1 <- ggplot(stacked, aes(y, fill = source)) +

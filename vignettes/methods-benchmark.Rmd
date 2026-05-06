@@ -85,24 +85,75 @@ fits <- lapply(methods_to_try, function(m) {
 names(fits) <- methods_to_try
 ```
 
-## Storage footprint
+## Storage efficiency
 
-A practical proxy for "how small does it get on disk":
+Compare compressed file sizes against the original posterior draws.
+Expected pattern: GMM-based methods are usually much smaller than KDE
+because they store only mixture parameters rather than all data points.
 
-```{r footprint}
-sizes <- sapply(fits, function(f) {
-  tf <- tempfile(fileext = ".rds")
-  saveRDS(f, tf, compress = "xz")
-  on.exit(unlink(tf), add = TRUE)
-  file.size(tf)
-})
+```{r footprint, fig.width=8, fig.height=4}
+has_ggplot <- requireNamespace("ggplot2", quietly = TRUE)
 
-original <- as.numeric(object.size(draws))
-data.frame(
-  method        = names(sizes),
-  bytes         = sizes,
-  ratio_to_raw  = round(original / sizes, 1)
+tmp_dir <- tempfile("storage-benchmark-")
+dir.create(tmp_dir, recursive = TRUE, showWarnings = FALSE)
+
+csv_files <- file.path(tmp_dir, "posterior_draws.csv")
+utils::write.csv(draws, csv_files, row.names = FALSE)
+
+rds_paths <- file.path(tmp_dir, paste0("posterior_", names(fits), ".rds"))
+for (i in seq_along(fits)) {
+  saveRDS(fits[[i]], rds_paths[[i]], compress = "xz")
+}
+
+original_size <- as.numeric(file.size(csv_files))
+compressed_sizes <- file.size(rds_paths)
+compression_x <- original_size / compressed_sizes
+pct_of_original <- 100 * compressed_sizes / original_size
+
+for (i in seq_along(compressed_sizes)) {
+  cat(
+    sprintf(
+      "%-12s %10s bytes (%.2f%% of original, %.0fx compression)\n",
+      paste0(names(fits)[[i]], ":"),
+      format(compressed_sizes[[i]], big.mark = ","),
+      pct_of_original[[i]],
+      compression_x[[i]]
+    )
+  )
+}
+
+storage_df <- data.frame(
+  method = names(fits),
+  bytes = as.numeric(compressed_sizes),
+  pct_of_original = as.numeric(pct_of_original),
+  compression_x = as.numeric(compression_x)
 )
+storage_df <- storage_df[order(storage_df$bytes), ]
+print(storage_df)
+
+if (has_ggplot) {
+  ggplot2::ggplot(
+    storage_df,
+    ggplot2::aes(x = reorder(method, bytes), y = bytes, fill = method)
+  ) +
+    ggplot2::geom_col(alpha = 0.85) +
+    ggplot2::geom_text(
+      ggplot2::aes(label = sprintf("%.0fx", compression_x)),
+      vjust = -0.3,
+      size = 3
+    ) +
+    ggplot2::scale_y_log10(labels = scales::label_number(big.mark = ",")) +
+    ggplot2::labs(
+      title = "Storage efficiency by compression method",
+      subtitle = "Label = compression factor vs original CSV",
+      x = "Method",
+      y = "Compressed size (bytes, log scale)"
+    ) +
+    ggplot2::theme_bw() +
+    ggplot2::theme(legend.position = "none")
+} else {
+  message("Install suggested package 'ggplot2' to render the storage efficiency plot.")
+}
 ```
 
 ## Sample regeneration
