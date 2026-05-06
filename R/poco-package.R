@@ -32,8 +32,8 @@
 #' @keywords internal
 #' @importFrom utils head object.size
 #' @importFrom stats cov sd
-#' @import mclust
-#' @import mvtnorm
+#' @importFrom mclust Mclust
+#' @importFrom mvtnorm rmvnorm dmvnorm
 "_PACKAGE"
 
 ## quiets concerns of R CMD check re: the .'s that appear in pipelines
