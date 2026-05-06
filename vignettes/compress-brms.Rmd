@@ -1,0 +1,123 @@
+---
+title: "Compressing brms posteriors"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+vignette: >
+  %\VignetteIndexEntry{Compressing brms posteriors}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment  = "#>",
+  fig.width  = 7,
+  fig.height = 4,
+  eval = FALSE
+)
+```
+
+This vignette walks through the full workflow for compressing a
+`brms::brmsfit`, then reconstructing it for use with the standard
+`brms` post-processing functions (`predict()`, `posterior_predict()`,
+`pp_check()`, ...). Chunks are not evaluated by default because they
+require `brms` + `cmdstanr` + a working CmdStan install.
+
+```{r libs, eval = TRUE}
+library(poco)
+```
+
+## Fit a brms model
+
+The model **must** use the cmdstanr backend so that
+`compress_brmsfit()` can reach the CSV draws.
+
+```{r fit_brms}
+library(brms)
+library(dplyr)
+
+set.seed(1)
+n_groups <- 20; n_per <- 15
+dat <- expand.grid(group = 1:n_groups, rep = 1:n_per)
+dat$x  <- rnorm(nrow(dat))
+re     <- rnorm(n_groups, 0, 0.5)
+dat$y  <- 2 + 1.5 * dat$x + re[dat$group] + rnorm(nrow(dat), 0, 0.8)
+
+fit <- brm(
+  y ~ x + (1 | group),
+  data    = dat,
+  backend = "cmdstanr",
+  chains  = 4,
+  iter    = 2000,
+  warmup  = 1000,
+  refresh = 0
+)
+```
+
+## Compress and save
+
+A single call returns both the compressed posterior and the brms fit
+structure. Save them separately so the structure can be reused with any
+future updates to the compressed posterior.
+
+```{r compress}
+result <- compress_brmsfit(
+  fit,
+  method       = "mclust",
+  n_components = 5,
+  remove_csvs  = FALSE
+)
+
+saveRDS(result$compressed, "model_compressed.rds", compress = "xz")
+saveRDS(result$structure,  "model_structure.rds")
+```
+
+`result$compressed` carries the GMM parameters; `result$structure` is
+the original `brmsfit`, which we keep so that downstream methods can be
+re-attached.
+
+## Reconstruct and use the model
+
+```{r reconstruct}
+result_loaded <- list(
+  compressed = readRDS("model_compressed.rds"),
+  structure  = readRDS("model_structure.rds")
+)
+
+fit_recon <- reconstruct_brmsfit(result_loaded)
+
+# Now use brms machinery as normal:
+new_data <- data.frame(x = seq(-2, 2, length.out = 20),
+                       group = rep(1:5, each = 4))
+
+predict(fit_recon, newdata = new_data)
+posterior_predict(fit_recon, newdata = new_data)
+conditional_effects(fit_recon)
+```
+
+MCMC diagnostics (`Rhat`, ESS) are *not* preserved by the regenerated
+draws.
+
+## Other methods
+
+`compress_brmsfit()` shares the same `method` argument as
+`compress_posterior()`. To use a different backend, e.g. mvdens GMM:
+
+```{r mvdens}
+result <- compress_brmsfit(
+  fit,
+  method       = "mvdens_gmm",
+  n_components = 5
+)
+```
+
+(Requires the suggested `mvdens` package -
+`remotes::install_github("NKI-CCB/mvdens")`.)
+
+## Session info
+
+```{r si, eval = TRUE}
+sessionInfo()
+```

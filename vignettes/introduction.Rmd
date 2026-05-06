@@ -1,0 +1,131 @@
+---
+title: "Introduction to poco"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+vignette: >
+  %\VignetteIndexEntry{Introduction to poco}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment  = "#>",
+  fig.width = 6,
+  fig.height = 4
+)
+```
+
+`poco` (POsterior COmpression, "little" in Italian) provides a small, unified API for turning a posterior
+draws matrix into a compact density approximation, then drawing fresh
+samples or evaluating the density on demand.
+
+This vignette shows the matrix-in / samples-out workflow on a synthetic
+two-component example. See `vignette("compress-brms")` and
+`vignette("compress-funnel")` for end-to-end workflows on real `brms` and
+`cmdstanr` fits.
+
+```{r libs}
+library(poco)
+library(mvtnorm)
+```
+
+## A toy posterior
+
+We build a synthetic two-blob "posterior" so we can see compression
+preserve multimodality.
+
+```{r toy_data}
+set.seed(1)
+n_per <- 2000
+draws <- rbind(
+  mvtnorm::rmvnorm(n_per, mean = c(-2, -1),
+                   sigma = matrix(c(0.5, 0.1, 0.1, 0.3), 2)),
+  mvtnorm::rmvnorm(n_per, mean = c( 2,  1),
+                   sigma = matrix(c(0.4, -0.2, -0.2, 0.6), 2))
+)
+colnames(draws) <- c("alpha", "beta")
+head(draws)
+```
+
+## Compress
+
+Pick a `method` (the rest of the API does not change):
+
+```{r compress}
+comp <- compress_posterior(
+  draws,
+  method = "mclust",
+  n_components = 2
+)
+comp
+```
+
+`compression_methods()` lists the currently supported choices.
+
+```{r methods}
+compression_methods()
+```
+
+## Regenerate samples
+
+```{r sample}
+new_draws <- sample_posterior(comp, n_draws = 5000)
+dim(new_draws)
+head(new_draws)
+```
+
+A quick sanity check on means and covariances:
+
+```{r quality}
+round(colMeans(draws),     3); round(colMeans(new_draws),     3)
+round(cov(draws),          3); round(cov(new_draws),          3)
+```
+
+## Evaluate the density
+
+`density_posterior()` accepts a matrix of points (one per row).
+
+```{r density}
+test_pts <- rbind(
+  c(-2, -1),
+  c( 0,  0),
+  c( 2,  1)
+)
+density_posterior(comp, test_pts)
+density_posterior(comp, test_pts, log = TRUE)
+```
+
+## Save / load
+
+The compressed object is a plain list, so `saveRDS()` (with xz
+compression) works out of the box.
+
+```{r save_load}
+tf <- tempfile(fileext = ".rds")
+saveRDS(comp, tf, compress = "xz")
+file.size(tf)
+
+comp_loaded <- readRDS(tf)
+identical(class(comp_loaded), class(comp))
+
+s <- sample_posterior(tf, n_draws = 100)  # path also works
+dim(s)
+
+unlink(tf)
+```
+
+## Where to next
+
+- `vignette("compress-brms", package = "poco")` for a
+  full `brms::brmsfit` round-trip including reconstruction.
+- `vignette("compress-funnel", package = "poco")` for a
+  cmdstanr workflow on Neal's funnel.
+
+## Session info
+
+```{r si}
+sessionInfo()
+```

@@ -1,0 +1,14 @@
+.Rproj.user
+.Rhistory
+.RData
+.Ruserdata
+*.Rproj
+.DS_Store
+inst/doc
+doc
+docs
+/*.tar.gz
+/*.Rcheck
+*.rds
+*.csv
+cmdstanr_draws/

@@ -1,0 +1,45 @@
+Package: poco
+Type: Package
+Title: poco (POsterior COmpression): Compress Bayesian Posteriors Using Mixture and Density Approximations
+Version: 0.1.0
+Authors@R: c(
+    person("Chen", "Zhan", , "chen.zhan@adelaide.edu.au",
+           role = c("aut", "cre")),
+    person("Stefano", "Mangiola", , "mangiola.s@wehi.edu.au",
+           role = "aut"))
+Description: Provides a unified interface for compressing Markov chain Monte
+    Carlo (MCMC) posterior draws into compact density approximations
+    (Gaussian mixture models or kernel density estimates), and for
+    regenerating samples and evaluating density on demand. Supports raw
+    posterior matrices and 'cmdstanr', 'brms', and 'sccomp' fits, with
+    pluggable methods selected via a single `method` argument.
+License: GPL-3
+Encoding: UTF-8
+LazyData: true
+Depends:
+    R (>= 4.1.0)
+Imports:
+    mclust,
+    mvtnorm,
+    stats,
+    utils,
+    cli
+Suggests:
+    posterior,
+    cmdstanr,
+    brms,
+    sccomp,
+    mvdens,
+    ggplot2,
+    gridExtra,
+    knitr,
+    rmarkdown,
+    testthat (>= 3.0.0)
+Additional_repositories:
+    https://mc-stan.org/r-packages/
+URL: https://github.com/MangiolaLaboratory/poco
+BugReports: https://github.com/MangiolaLaboratory/poco/issues
+Config/testthat/edition: 3
+RoxygenNote: 7.3.3
+VignetteBuilder: knitr
+Roxygen: list(markdown = TRUE)
