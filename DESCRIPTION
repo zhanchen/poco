@@ -31,7 +31,8 @@ Suggests:
     sccomp,
     mvdens,
     ggplot2,
-    gridExtra,
+    ggside,
+    patchwork,
     knitr,
     rmarkdown,
     testthat (>= 3.0.0)

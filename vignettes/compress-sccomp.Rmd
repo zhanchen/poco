@@ -79,6 +79,30 @@ fit_recon <- reconstruct_sccomp(result_loaded)
 fit_recon
 ```
 
+## Compare pairwise posterior geometry
+
+Use `bayesplot::mcmc_pairs()` to compare pairwise structure before and
+after reconstruction.
+
+```{r pairs}
+library(bayesplot)
+
+fit_cmdstan <- attr(fit, "fit")
+fit_recon_cmdstan <- attr(fit_recon, "fit")
+
+all_pars <- fit_cmdstan$variables()
+pair_pars <- head(all_pars[!grepl("__", all_pars)], 4)
+if (length(pair_pars) < 2) {
+  pair_pars <- head(all_pars, min(4, length(all_pars)))
+}
+
+draws_orig <- fit_cmdstan$draws(variables = pair_pars, format = "draws_array")
+draws_recon <- fit_recon_cmdstan$draws(variables = pair_pars, format = "draws_array")
+
+bayesplot::mcmc_pairs(draws_orig, pars = pair_pars)
+bayesplot::mcmc_pairs(draws_recon, pars = pair_pars)
+```
+
 MCMC diagnostics (`Rhat`, ESS) are *not* preserved by the regenerated
 draws.
 

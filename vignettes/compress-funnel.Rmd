@@ -97,7 +97,6 @@ round(rbind(
 
 ```{r plots, message = FALSE, warning = FALSE}
 library(ggplot2)
-library(gridExtra)
 
 stacked <- rbind(
   data.frame(draws_orig[, c("y", "x[1]")], source = "original",
@@ -110,7 +109,7 @@ p1 <- ggplot(stacked, aes(y, fill = source)) +
   geom_density(alpha = 0.35) + theme_minimal()
 p2 <- ggplot(stacked, aes(y, `x[1]`, color = source)) +
   geom_point(alpha = 0.2, size = 0.4) + theme_minimal()
-grid.arrange(p1, p2, ncol = 2)
+patchwork::wrap_plots(p1, p2, ncol = 2)
 ```
 
 ## Session info

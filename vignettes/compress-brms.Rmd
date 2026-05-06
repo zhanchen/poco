@@ -97,6 +97,23 @@ posterior_predict(fit_recon, newdata = new_data)
 conditional_effects(fit_recon)
 ```
 
+## Compare pairwise posterior geometry
+
+Use `bayesplot::mcmc_pairs()` to compare the original and reconstructed
+draw geometry on the same subset of parameters.
+
+```{r pairs}
+library(bayesplot)
+
+pair_pars <- c("b_Intercept", "b_x", "sd_group__Intercept", "sigma")
+
+draws_orig <- posterior::as_draws_array(fit, variable = pair_pars)
+draws_recon <- posterior::as_draws_array(fit_recon, variable = pair_pars)
+
+bayesplot::mcmc_pairs(draws_orig, pars = pair_pars)
+bayesplot::mcmc_pairs(draws_recon, pars = pair_pars)
+```
+
 MCMC diagnostics (`Rhat`, ESS) are *not* preserved by the regenerated
 draws.
 

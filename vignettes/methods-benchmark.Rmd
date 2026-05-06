@@ -46,12 +46,26 @@ compression_methods()
 set.seed(1)
 n_per <- 2000
 draws <- rbind(
-  mvtnorm::rmvnorm(n_per, mean = c(-2, -1),
-                   sigma = matrix(c(0.5,  0.1,  0.1, 0.3), 2)),
-  mvtnorm::rmvnorm(n_per, mean = c( 2,  1),
-                   sigma = matrix(c(0.4, -0.2, -0.2, 0.6), 2))
+  mvtnorm::rmvnorm(
+    n_per,
+    mean = c(5.5, 2.0, 2.0),
+    sigma = matrix(c(
+      1.0, -0.14, 0.00,
+      -0.14, 0.03, 0.00,
+      0.00, 0.00, 0.05
+    ), 3, 3, byrow = TRUE)
+  ),
+  mvtnorm::rmvnorm(
+    n_per,
+    mean = c(7.0, 1.8, 1.9),
+    sigma = matrix(c(
+      1.2, -0.18, 0.00,
+      -0.18, 0.04, 0.00,
+      0.00, 0.00, 0.06
+    ), 3, 3, byrow = TRUE)
+  )
 )
-colnames(draws) <- c("alpha", "beta")
+colnames(draws) <- c("alpha", "beta", "sigma")
 ```
 
 ## Compress with each method
@@ -101,14 +115,109 @@ regen <- lapply(fits, sample_posterior, n_draws = 2000)
 sapply(regen, function(s) {
   c(mean_alpha = mean(s[, "alpha"]),
     mean_beta  = mean(s[, "beta"]),
-    cor        = cor(s[, "alpha"], s[, "beta"]))
+    mean_sigma = mean(s[, "sigma"]),
+    cor_alpha_beta = cor(s[, "alpha"], s[, "beta"]))
 })
+```
+
+## Pairwise comparison plot
+
+Visual overlap between original draws (gray) and regenerated samples.
+
+```{r combined-plot, fig.width=10, fig.height=8}
+if (requireNamespace("ggplot2", quietly = TRUE) &&
+    requireNamespace("patchwork", quietly = TRUE)) {
+  draws_df <- as.data.frame(draws)
+  palette_map <- c(mvdens_gmm = "red", mvdens_kde = "darkgreen", mclust = "blue")
+  has_ggside <- requireNamespace("ggside", quietly = TRUE)
+
+  plot_pairwise <- function(var1, var2) {
+    p <- ggplot2::ggplot(mapping = ggplot2::aes_string(x = var1, y = var2)) +
+      ggplot2::geom_point(
+        data = draws_df,
+        alpha = 0.15,
+        size = 0.5,
+        color = "gray50"
+      ) +
+      ggplot2::labs(
+        x = var1,
+        y = var2,
+        title = paste(var1, "vs", var2)
+      ) +
+      ggplot2::theme_bw() +
+      ggplot2::theme(plot.title = ggplot2::element_text(size = 9))
+
+    if (has_ggside) {
+      p <- p +
+        ggside::geom_xsidedensity(
+          data = draws_df,
+          ggplot2::aes(y = ..density..),
+          color = "gray50",
+          alpha = 0.8
+        ) +
+        ggside::geom_ysidedensity(
+          data = draws_df,
+          ggplot2::aes(x = ..density..),
+          color = "gray50",
+          alpha = 0.8
+        ) +
+        ggside::theme_ggside_void()
+    }
+
+    for (method_name in names(regen)) {
+      regen_df <- as.data.frame(regen[[method_name]])
+      p <- p + ggplot2::geom_point(
+        data = regen_df,
+        alpha = 0.4,
+        size = 0.5,
+        color = unname(palette_map[method_name])
+      )
+
+      if (has_ggside) {
+        p <- p +
+          ggside::geom_xsidedensity(
+            data = regen_df,
+            ggplot2::aes(y = ..density..),
+            color = unname(palette_map[method_name]),
+            alpha = 0.8
+          ) +
+          ggside::geom_ysidedensity(
+            data = regen_df,
+            ggplot2::aes(x = ..density..),
+            color = unname(palette_map[method_name]),
+            alpha = 0.8
+          )
+      }
+    }
+    p
+  }
+
+  param_names <- colnames(draws_df)
+  plot_list <- list()
+  idx <- 1
+  for (i in 1:(length(param_names) - 1)) {
+    for (j in (i + 1):length(param_names)) {
+      plot_list[[idx]] <- plot_pairwise(param_names[i], param_names[j])
+      idx <- idx + 1
+    }
+  }
+
+  ncol_grid <- ceiling(sqrt(length(plot_list)))
+  combined_plot <- patchwork::wrap_plots(plot_list, ncol = ncol_grid) +
+    patchwork::plot_annotation(
+      title = "Original (gray) | mvdens GMM (red) | mvdens KDE (green) | mclust GMM (blue)"
+    )
+
+  combined_plot
+} else {
+  message("Install suggested packages 'ggplot2' and 'patchwork' to render combined_plot.")
+}
 ```
 
 ## Density evaluation
 
 ```{r density}
-test_pts <- rbind(c(-2, -1), c(0, 0), c(2, 1))
+test_pts <- rbind(c(5.5, 2.0, 2.0), c(6.2, 1.9, 1.8), c(7.0, 1.8, 2.1))
 
 sapply(fits, function(f) density_posterior(f, test_pts))
 ```
