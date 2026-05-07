@@ -15,10 +15,15 @@ test_that("reconstruct_brmsfit input validation", {
 })
 
 test_that("compress_brmsfit + reconstruct_brmsfit (integration)", {
+  # Same gate as vignettes: rworkflows has no CmdStan; workflow_with_cmdstanr
+  # installs it and runs this test in full.
+  skip_if_not(
+    instantiate::stan_cmdstan_exists(),
+    "CmdStan not installed (full Stan coverage runs in workflow_with_cmdstanr)"
+  )
   expect_true(requireNamespace("brms", quietly = TRUE))
   expect_true(requireNamespace("cmdstanr", quietly = TRUE))
   expect_true(requireNamespace("posterior", quietly = TRUE))
-  expect_no_error(cmdstanr::cmdstan_path())
 
   set.seed(1)
   dat <- data.frame(x = rnorm(40), y = NA_real_)
