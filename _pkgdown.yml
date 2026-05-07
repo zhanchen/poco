@@ -1,0 +1,8 @@
+# Article order on the pkgdown/GitHub Pages site ("Articles" menu).
+articles:
+  - title: Articles
+    contents:
+      - introduction
+      - methods-benchmark
+      - compress-funnel
+      - compress-brms
