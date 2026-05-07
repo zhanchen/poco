@@ -27,15 +27,36 @@
 #'   remain identifiable, otherwise mclust's full default set is used
 #'   and BIC picks the best.
 #' @param verbose Logical; print backend progress. Default `FALSE`.
+#' @param partition Optional [partition_parameters_clusters()] output. When
+#'   supplied, the posterior is compressed **blockwise**: each cluster is
+#'   fitted on its own (typically with a richer covariance family,
+#'   `cluster_model_name`), the **remainder** is fitted with the cheaper
+#'   diagonal `remainder_model_name`, and the per-block fits are wrapped in
+#'   a `posterior_compressed_blockwise` object. Blocks are then assumed to
+#'   be independent (within-block correlations preserved, between-block
+#'   correlations dropped).
+#' @param cluster_model_name `mclust` covariance structure to use for the
+#'   *cluster* blocks when `partition` is provided. If `NULL` (default) and
+#'   `method = "mclust"`, `poco` restricts BIC selection to the
+#'   **non-diagonal** ellipsoidal families (`EEE`/`VEE`/`EVE`/`VVE`/`EEV`/
+#'   `VEV`/`EVV`/`VVV`) so within-cluster correlations can be represented
+#'   when identifiable.
+#' @param remainder_model_name `mclust` covariance structure to use for the
+#'   *remainder* block when `partition` is provided. If `NULL` (default) and
+#'   `method = "mclust"`, `poco` restricts BIC selection to the
+#'   **diagonal/spherical** families (`EII`/`VII`/`EEI`/`EVI`/`VEI`/`VVI`).
 #' @param ... Additional arguments forwarded to the backend (e.g.
 #'   [mclust::Mclust()]).
 #'
 #' @return An S3 list of class `c("posterior_compressed_<method>",
 #'   "posterior_compressed", "list")` containing the parameters of the
-#'   fitted approximation.
+#'   fitted approximation. When `partition` is provided, the class is
+#'   `c("posterior_compressed_blockwise", "posterior_compressed", "list")`
+#'   and `$blocks` is a named list of per-block compressed objects.
 #'
 #' @seealso [compress_fit()], [compress_brmsfit()], [compress_sccomp()],
-#'   [sample_posterior()], [density_posterior()].
+#'   [sample_posterior()], [density_posterior()],
+#'   [partition_parameters_clusters()].
 #'
 #' @examples
 #' set.seed(1)
@@ -54,9 +75,25 @@ compress_posterior <- function(
     n_components = 3L,
     model_name = NULL,
     verbose = FALSE,
+    partition            = NULL,
+    cluster_model_name   = NULL,
+    remainder_model_name = NULL,
     ...) {
   method <- .match_method(method)
   draws_mat <- .as_draws_matrix(draws, variables = variables)
+
+  if (!is.null(partition)) {
+    return(.compress_blockwise(
+      draws_mat,
+      partition            = partition,
+      method               = method,
+      n_components         = n_components,
+      cluster_model_name   = cluster_model_name,
+      remainder_model_name = remainder_model_name,
+      verbose              = verbose,
+      ...
+    ))
+  }
 
   comp <- switch(
     method,
@@ -181,17 +218,34 @@ compress_fit <- function(
 #'
 #' @return A list with two elements:
 #'   \describe{
-#'     \item{compressed}{a `posterior_compressed` object;}
+#'     \item{compressed}{a `posterior_compressed` object (or
+#'       `posterior_compressed_blockwise` when `partition` is supplied);}
 #'     \item{structure}{the brmsfit (so [reconstruct_brmsfit()] can rebuild
 #'       a usable model).}
 #'   }
 #'
-#' @seealso [reconstruct_brmsfit()], [sample_posterior()].
+#' @seealso [reconstruct_brmsfit()], [sample_posterior()],
+#'   [partition_parameters_clusters()].
 #'
 #' @examples
 #' \dontrun{
 #' fit <- brms::brm(y ~ x, data = dat, backend = "cmdstanr")
+#' # Single-block compression (existing default).
 #' result <- compress_brmsfit(fit, method = "mclust", n_components = 5)
+#'
+#' # Hybrid blockwise compression: rich covariance per cluster, diagonal
+#' # ("VVI") for the remainder block.
+#' draws <- posterior::as_draws_matrix(fit)
+#' cm    <- posterior_correlation(draws)
+#' part  <- partition_parameters_clusters(cm, threshold = 0.4, min_size = 0.02)
+#' result_block <- compress_brmsfit(
+#'   fit,
+#'   method               = "mclust",
+#'   n_components         = 3,
+#'   partition            = part,
+#'   cluster_model_name   = NULL,    # auto, BIC across full covariance set
+#'   remainder_model_name = "VVI"
+#' )
 #'
 #' saveRDS(result$compressed, "model_compressed.rds", compress = "xz")
 #' saveRDS(result$structure,  "model_structure.rds")
@@ -207,6 +261,9 @@ compress_brmsfit <- function(
     n_components = 3L,
     model_name = NULL,
     verbose = FALSE,
+    partition            = NULL,
+    cluster_model_name   = NULL,
+    remainder_model_name = NULL,
     ...) {
   method <- .match_method(method)
 
@@ -246,10 +303,13 @@ compress_brmsfit <- function(
 
   comp <- compress_posterior(
     draws_mat,
-    method = method,
-    n_components = n_components,
-    model_name = model_name,
-    verbose = verbose,
+    method               = method,
+    n_components         = n_components,
+    model_name           = model_name,
+    verbose              = verbose,
+    partition            = partition,
+    cluster_model_name   = cluster_model_name,
+    remainder_model_name = remainder_model_name,
     ...
   )
 
@@ -261,12 +321,19 @@ compress_brmsfit <- function(
 
 #' Strip the heavy stanfit draws from a brmsfit, keeping the shell so
 #' [reconstruct_brmsfit()] can refill `@sim$samples` later.
+#'
+#' We also prepend the class `"brmsfit_stripped"` so that auto-printing
+#' the structure (e.g. `result$structure` at the console) dispatches to
+#' our small [print.brmsfit_stripped()] method instead of
+#' `brms::print.brmsfit`, which would call into the rstan summary
+#' machinery and fail with `do.call(cbind, attr(x, "sampler_params"))`
+#' on the empty stanfit. `inherits(., "brmsfit")` still holds.
 #' @keywords internal
 #' @noRd
 .strip_brmsfit_draws <- function(brmsfit) {
   sf <- brmsfit$fit
   if (is.null(sf) || !methods::is(sf, "stanfit") || is.null(sf@sim)) {
-    return(brmsfit)
+    return(.tag_brmsfit_stripped(brmsfit))
   }
   for (chain in seq_along(sf@sim$samples)) {
     sf@sim$samples[[chain]] <- lapply(sf@sim$samples[[chain]], function(x) {
@@ -276,7 +343,66 @@ compress_brmsfit <- function(
   sf@sim$n_save  <- rep(0L, length(sf@sim$samples))
   sf@sim$warmup2 <- rep(0L, length(sf@sim$samples))
   brmsfit$fit <- sf
+  .tag_brmsfit_stripped(brmsfit)
+}
+
+
+#' Add/remove the `"brmsfit_stripped"` class tag.
+#' @keywords internal
+#' @noRd
+.tag_brmsfit_stripped <- function(brmsfit) {
+  cls <- class(brmsfit)
+  if (!"brmsfit_stripped" %in% cls) {
+    class(brmsfit) <- c("brmsfit_stripped", cls)
+  }
   brmsfit
+}
+
+#' @keywords internal
+#' @noRd
+.untag_brmsfit_stripped <- function(brmsfit) {
+  cls <- class(brmsfit)
+  cls <- cls[cls != "brmsfit_stripped"]
+  class(brmsfit) <- cls
+  brmsfit
+}
+
+
+#' Print method for a draws-stripped brmsfit shell
+#'
+#' Avoids dispatching to `brms::print.brmsfit`, whose summary machinery
+#' fails on a stanfit whose `@sim$samples` have been zeroed out by
+#' [compress_brmsfit()] (typical error:
+#' `do.call(cbind, attr(x, "sampler_params")) : second argument must be a list`).
+#'
+#' @param x A brmsfit returned inside `compress_brmsfit()$structure`.
+#' @param ... Currently unused.
+#' @return Invisibly returns `x`.
+#' @export
+print.brmsfit_stripped <- function(x, ...) {
+  cls <- setdiff(class(x), "brmsfit_stripped")
+  cat("<brmsfit, draws stripped by poco::compress_brmsfit()>\n")
+  cat("  classes : ", paste(cls, collapse = "/"), "\n", sep = "")
+  if (!is.null(x$formula)) {
+    f <- tryCatch(format(x$formula), error = function(e) NULL)
+    if (!is.null(f)) {
+      cat("  formula : ", paste(f, collapse = " "), "\n", sep = "")
+    }
+  }
+  if (!is.null(x$family)) {
+    fam <- tryCatch(x$family$family, error = function(e) NULL)
+    if (!is.null(fam)) cat("  family  : ", fam, "\n", sep = "")
+  }
+  sf <- x$fit
+  if (!is.null(sf) && methods::is(sf, "stanfit") && !is.null(sf@sim)) {
+    cat(
+      "  chains  : ", length(sf@sim$samples),
+      "  (per-chain draws stored: 0)\n",
+      sep = ""
+    )
+  }
+  cat("  Use reconstruct_brmsfit() to refill draws from the compressed posterior.\n")
+  invisible(x)
 }
 
 

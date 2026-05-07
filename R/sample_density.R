@@ -3,11 +3,14 @@
 #' Draws fresh posterior samples from an object returned by
 #' [compress_posterior()] or its wrappers.
 #'
-#' @param object A `posterior_compressed` object, or a path to an `.rds`
-#'   file containing one (a single string).
+#' @param object A `posterior_compressed` object (single-block or
+#'   `posterior_compressed_blockwise`), or a path to an `.rds` file
+#'   containing one.
 #' @param n_draws Integer number of samples to draw. If `NULL` (default),
 #'   uses the original number of MCMC draws.
-#' @param ... Currently unused.
+#' @param ... Backend-specific options. Currently the only honoured option
+#'   is `verbose = TRUE` for blockwise objects, which prints a per-block
+#'   sampling progress message.
 #'
 #' @return A numeric matrix of draws (rows = draws, cols = parameters).
 #' @export
@@ -21,6 +24,14 @@
 #' dim(s)
 sample_posterior <- function(object, n_draws = NULL, ...) {
   object <- .resolve_compressed(object)
+  if (inherits(object, "posterior_compressed_blockwise")) {
+    dots <- list(...)
+    return(.sample_blockwise(
+      object,
+      n_draws = n_draws,
+      verbose = isTRUE(dots$verbose)
+    ))
+  }
   if (inherits(object, "posterior_compressed_mclust")) {
     return(.sample_mclust(object, n_draws = n_draws))
   }
@@ -57,6 +68,9 @@ sample_posterior <- function(object, n_draws = NULL, ...) {
 #' @export
 density_posterior <- function(object, x, log = FALSE, ...) {
   object <- .resolve_compressed(object)
+  if (inherits(object, "posterior_compressed_blockwise")) {
+    return(.density_blockwise(object, x, log = log))
+  }
   if (inherits(object, "posterior_compressed_mclust")) {
     return(.density_mclust(object, x, log = log))
   }

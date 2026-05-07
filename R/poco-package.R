@@ -37,4 +37,5 @@
 "_PACKAGE"
 
 ## quiets concerns of R CMD check re: the .'s that appear in pipelines
-utils::globalVariables(c("."))
+## and the .data pronoun used inside ggplot2 aes() in correlation.R
+utils::globalVariables(c(".", ".data"))

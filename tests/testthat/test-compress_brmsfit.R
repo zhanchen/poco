@@ -40,9 +40,16 @@ test_that("compress_brmsfit + reconstruct_brmsfit (integration)", {
   expect_named(res, c("compressed", "structure"))
   expect_s3_class(res$compressed, "posterior_compressed_mclust")
   expect_s3_class(res$structure, "brmsfit")
+  # The structure must also carry the stripped-shell tag so that
+  # auto-printing it doesn't dispatch to brms::print.brmsfit and crash on
+  # the empty stanfit (regression for "do.call(cbind, attr(x,
+  # 'sampler_params')) : second argument must be a list").
+  expect_s3_class(res$structure, "brmsfit_stripped")
+  expect_no_error(capture.output(print(res$structure)))
 
   recon <- reconstruct_brmsfit(res, n_draws = 400)
   expect_s3_class(recon, "brmsfit")
+  expect_false(inherits(recon, "brmsfit_stripped"))
   expect_true(methods::is(recon$fit, "stanfit"))
   expect_true(length(recon$fit@sim$samples) > 0L)
   expect_true(length(recon$fit@sim$samples[[1]][["b_Intercept"]]) > 0L)

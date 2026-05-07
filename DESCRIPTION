@@ -32,6 +32,7 @@ Suggests:
     mvdens,
     microbenchmark,
     ggplot2,
+    ggdendro,
     ggside,
     patchwork,
     knitr,

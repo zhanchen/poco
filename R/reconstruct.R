@@ -5,6 +5,13 @@
 #' methods (`predict()`, `posterior_predict()`, `pp_check()`,
 #' `conditional_effects()`, ...) keep working with the lighter object.
 #'
+#' Works with both single-block compressions
+#' (`posterior_compressed_mclust`, `posterior_compressed_mvdens_*`) and
+#' the hybrid blockwise variant (`posterior_compressed_blockwise`).
+#' For blockwise objects, [sample_posterior()] regenerates each block
+#' independently and re-aligns columns to the original parameter order
+#' before the per-chain refill below — no special handling is required.
+#'
 #' MCMC diagnostics (`Rhat`, `ESS`, ...) are not preserved.
 #'
 #' @param x The output of [compress_brmsfit()] (a list with `compressed`
@@ -13,7 +20,17 @@
 #' @param n_draws Integer number of samples to regenerate. Defaults to
 #'   the original number of draws stored in `x$structure`.
 #'
-#' @return A `brmsfit` object with regenerated draws.
+#' @return A `brmsfit` object with regenerated draws and the following
+#'   informational attributes:
+#'   \describe{
+#'     \item{`compression_method`}{`comp$method` (e.g. `"mclust"` or
+#'       `"blockwise"`);}
+#'     \item{`compression_base_method`}{for blockwise compressions, the
+#'       per-block backend (e.g. `"mclust"`); `NA_character_` otherwise;}
+#'     \item{`compression_blocks`}{for blockwise compressions, an integer
+#'       vector of per-block parameter counts (named after the block);}
+#'     \item{`reconstructed`}{`TRUE`.}
+#'   }
 #' @export
 reconstruct_brmsfit <- function(x, n_draws = get_n_draws_from_fit(x$structure)) {
   .check_reconstruct_input(x)
@@ -40,8 +57,14 @@ reconstruct_brmsfit <- function(x, n_draws = get_n_draws_from_fit(x$structure)) 
     stop(
       "The reconstructed fit needs draws for parameters that are not in ",
       "the compressed posterior:\n  ",
-      paste(missing_params, collapse = ", "),
-      "\n  Re-run compress_brmsfit() without restricting `variables`.",
+      paste(utils::head(missing_params, 5L), collapse = ", "),
+      if (length(missing_params) > 5L) ", ..." else "",
+      "\n  Re-run compress_brmsfit() without restricting `variables`",
+      if (inherits(comp, "posterior_compressed_blockwise")) {
+        " (or check the partition covers every parameter)."
+      } else {
+        "."
+      },
       call. = FALSE
     )
   }
@@ -50,10 +73,43 @@ reconstruct_brmsfit <- function(x, n_draws = get_n_draws_from_fit(x$structure)) 
   used <- per_chain * n_chains
   samples <- samples[seq_len(used), fnames, drop = FALSE]
 
+  # Build placeholder sampler-param *lists* once; rstan / brms read this
+  # both as a stanfit-level attribute (list of matrices, one per chain)
+  # AND per-chain as `attr(sim$samples[[i]], "sampler_params")`. Without
+  # the stanfit-level entry, auto-printing the reconstructed brmsfit dies
+  # with: do.call(cbind, attr(x, "sampler_params")) :
+  #         second argument must be a list.
+  placeholder_sp <- replicate(
+    n_chains,
+    .placeholder_sampler_params(per_chain),
+    simplify = FALSE
+  )
+
   for (chain in seq_len(n_chains)) {
     rows <- ((chain - 1L) * per_chain + 1L):(chain * per_chain)
-    sf@sim$samples[[chain]] <- as.list(
+    chain_samples <- as.list(
       as.data.frame(samples[rows, , drop = FALSE])
+    )
+    attr(chain_samples, "sampler_params") <- placeholder_sp[[chain]]
+    sf@sim$samples[[chain]] <- chain_samples
+  }
+
+  # Stanfit-level attribute (list of per-chain matrices). Some rstan code
+  # paths read this directly via `attr(stanfit, "sampler_params")`, e.g.
+  # `do.call(cbind, attr(stanfit, "sampler_params"))`.
+  attr(sf, "sampler_params") <- lapply(
+    placeholder_sp,
+    function(sp) do.call(cbind, sp)
+  )
+
+  # Stanfit-level `elapsed_time` is also commonly read by print/summary;
+  # set a benign zero matrix per chain so `get_elapsed_time()` does not
+  # crash on a stripped fit. (`do.call(rbind, NULL)` errors similarly.)
+  if (is.null(attr(sf, "elapsed_time"))) {
+    attr(sf, "elapsed_time") <- replicate(
+      n_chains,
+      stats::setNames(c(0, 0), c("warmup", "sample")),
+      simplify = FALSE
     )
   }
 
@@ -65,8 +121,21 @@ reconstruct_brmsfit <- function(x, n_draws = get_n_draws_from_fit(x$structure)) 
 
   fit_recon <- fit_structure
   fit_recon$fit <- sf
+  cls <- class(fit_recon)
+  class(fit_recon) <- cls[cls != "brmsfit_stripped"]
+
   attr(fit_recon, "compression_method") <- comp$method
   attr(fit_recon, "reconstructed")      <- TRUE
+  if (inherits(comp, "posterior_compressed_blockwise")) {
+    attr(fit_recon, "compression_base_method") <- comp$base_method
+    attr(fit_recon, "compression_blocks") <- vapply(
+      comp$blocks,
+      function(b) as.integer(b$n_params %||% length(b$param_names)),
+      integer(1L)
+    )
+  } else {
+    attr(fit_recon, "compression_base_method") <- NA_character_
+  }
 
   fit_recon
 }
@@ -130,6 +199,27 @@ reconstruct_sccomp <- function(x, n_draws = x$compressed$n_draws) {
   attr(obj, "compression_method") <- comp$method
   attr(obj, "reconstructed")      <- TRUE
   obj
+}
+
+
+#' Standard rstan sampler-param placeholders used by HMC/NUTS chains.
+#' `reconstruct_brmsfit()` attaches a finite-valued *named list* of vectors
+#' (one vector per sampler-param column), because rstan internally calls
+#' `do.call(cbind, attr(chain, "sampler_params"))` and therefore expects
+#' this attribute to be list-like. Values are benign defaults (e.g.
+#' `divergent__ = 0`) so brms/rstan summary code that uses logical checks
+#' like `if (div_trans > 0)` does not fail on `NA`.
+#' @keywords internal
+#' @noRd
+.placeholder_sampler_params <- function(n_iter) {
+  list(
+    accept_stat__ = rep(1.0, n_iter),
+    stepsize__    = rep(1.0, n_iter),
+    treedepth__   = rep(1.0, n_iter),
+    n_leapfrog__  = rep(1.0, n_iter),
+    divergent__   = rep(0.0, n_iter),
+    energy__      = rep(0.0, n_iter)
+  )
 }
 
 
