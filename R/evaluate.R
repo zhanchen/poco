@@ -19,7 +19,7 @@
 #'         distances.
 #'   \item \strong{Classifier two-sample test (C2ST)} (Lopez-Paz &
 #'         Oquab, 2017): trains a classifier (random forest via
-#'         `ranger` when available, else k-NN) under cross-validation
+#'         `ranger::ranger()` under cross-validation
 #'         to discriminate reference draws from reconstructed draws and
 #'         reports the out-of-fold ROC AUC. AUC = 0.5 means the two
 #'         samples are indistinguishable; the score is mapped to
@@ -54,9 +54,9 @@
 #'   at most this many rows. Default `2000`.
 #' @param n_self_reps Number of self-baseline replicates for the energy
 #'   metric. Default `20`.
-#' @param classifier Classifier for C2ST. `"auto"` uses `ranger` if
-#'   installed, else k-NN. `"ranger"` requires the `ranger` package.
-#'   `"knn"` is dependency-free.
+#' @param classifier Classifier for C2ST. `"ranger"` (default) uses a
+#'   random forest (`ranger::ranger()`). `"knn"` uses a k-NN probability
+#'   estimate instead (no random forest).
 #' @param cv_folds Cross-validation folds for C2ST. Default `5`.
 #' @param seed Optional integer seed for reproducibility.
 #' @param verbose Logical; print progress messages.
@@ -82,9 +82,10 @@
 #' draws <- matrix(rnorm(2000 * 3), ncol = 3,
 #'                 dimnames = list(NULL, c("alpha", "beta", "sigma")))
 #' comp <- compress_posterior(draws, method = "mclust", n_components = 2)
-#' fidelity <- evaluate_compression(comp, reference_draws = draws,
-#'                                  classifier = "knn", seed = 1L)
+#' fidelity <- evaluate_compression(comp, reference_draws = draws, seed = 1L)
 #' fidelity
+#'
+#' @importFrom stats predict
 #'
 #' @export
 evaluate_compression <- function(
@@ -94,7 +95,7 @@ evaluate_compression <- function(
     n_eval       = NULL,
     max_n        = 2000L,
     n_self_reps  = 20L,
-    classifier   = c("auto", "ranger", "knn"),
+    classifier   = c("ranger", "knn"),
     cv_folds     = 5L,
     seed         = NULL,
     verbose      = FALSE) {
@@ -303,10 +304,8 @@ print.compression_fidelity <- function(x, ...) {
 #' @keywords internal
 #' @noRd
 .c2st_metric <- function(ref, recon,
-                         classifier = "auto",
+                         classifier = "ranger",
                          cv_folds   = 5L) {
-  classifier <- .resolve_classifier(classifier)
-
   Z <- rbind(ref, recon)
   labels <- c(rep(0L, nrow(ref)), rep(1L, nrow(recon)))
 
@@ -336,26 +335,6 @@ print.compression_fidelity <- function(x, ...) {
     classifier       = classifier,
     cv_folds         = cv_folds
   )
-}
-
-#' @keywords internal
-#' @noRd
-.resolve_classifier <- function(classifier) {
-  if (classifier == "auto") {
-    if (requireNamespace("ranger", quietly = TRUE)) "ranger" else "knn"
-  } else if (classifier == "ranger") {
-    if (!requireNamespace("ranger", quietly = TRUE)) {
-      stop(
-        "classifier = 'ranger' requires the 'ranger' package.\n",
-        "  install.packages('ranger')\n",
-        "  Or set classifier = 'knn' / 'auto' to use the dependency-free fallback.",
-        call. = FALSE
-      )
-    }
-    "ranger"
-  } else {
-    "knn"
-  }
 }
 
 #' @keywords internal

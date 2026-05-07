@@ -5,7 +5,6 @@ test_that("evaluate_compression returns a compression_fidelity object", {
   fid <- evaluate_compression(
     comp,
     reference_draws = draws,
-    classifier      = "knn",
     seed            = 1L,
     n_self_reps     = 5L,
     max_n           = 600L
@@ -27,7 +26,6 @@ test_that("a faithful compression scores high on both metrics", {
   fid <- evaluate_compression(
     comp,
     reference_draws = draws,
-    classifier      = "knn",
     seed            = 1L,
     n_self_reps     = 5L,
     max_n           = 600L
@@ -74,11 +72,11 @@ test_that("diagonal-only mclust scores lower than full covariance on a correlate
 
   fid_diag <- evaluate_compression(
     comp_diag, draws,
-    classifier = "knn", seed = 1L, n_self_reps = 10L, max_n = 1000L
+    seed = 1L, n_self_reps = 10L, max_n = 1000L
   )
   fid_full <- evaluate_compression(
     comp_full, draws,
-    classifier = "knn", seed = 1L, n_self_reps = 10L, max_n = 1000L
+    seed = 1L, n_self_reps = 10L, max_n = 1000L
   )
 
   expect_lt(fid_diag$reproduction_pct, fid_full$reproduction_pct - 20)
@@ -107,7 +105,7 @@ test_that("evaluate_compression accepts a single metric", {
 
   fid_c <- evaluate_compression(
     comp, draws, metric = "c2st",
-    classifier = "knn", seed = 1L, max_n = 400L
+    seed = 1L, max_n = 400L
   )
   expect_named(fid_c$metrics, "c2st")
 })
@@ -150,15 +148,28 @@ test_that("print.compression_fidelity prints a reproduction line", {
   expect_output(print(fid), "reproduction")
 })
 
-test_that("ranger classifier path runs end-to-end", {
+test_that("default C2ST classifier is ranger", {
   draws <- make_two_blob_draws()
   comp <- compress_posterior(draws, method = "mclust", n_components = 2)
 
   fid <- evaluate_compression(
     comp, draws,
-    metric = "c2st", classifier = "ranger",
+    metric = "c2st",
     seed = 1L, max_n = 400L
   )
   expect_equal(fid$metrics$c2st$classifier, "ranger")
+  expect_true(is.finite(fid$metrics$c2st$auc))
+})
+
+test_that("classifier = knn uses k-NN path", {
+  draws <- make_two_blob_draws()
+  comp <- compress_posterior(draws, method = "mclust", n_components = 2)
+
+  fid <- evaluate_compression(
+    comp, draws,
+    metric = "c2st", classifier = "knn",
+    seed = 1L, max_n = 300L
+  )
+  expect_equal(fid$metrics$c2st$classifier, "knn")
   expect_true(is.finite(fid$metrics$c2st$auc))
 })

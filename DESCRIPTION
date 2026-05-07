@@ -1,7 +1,7 @@
 Package: poco
 Type: Package
 Title: poco (POsterior COmpression): Compress Bayesian Posteriors Using Mixture and Density Approximations
-Version: 0.1.0
+Version: 0.2.0
 Authors@R: c(
     person("Chen", "Zhan", , "chen.zhan@adelaide.edu.au",
            role = c("aut", "cre")),

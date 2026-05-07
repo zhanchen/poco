@@ -130,10 +130,10 @@ compression):
 
 - **Energy distance** (Szekely & Rizzo) anchored against a bootstrap
   Monte Carlo noise envelope from the reference itself.
-- **Classifier two-sample test (C2ST)** — a random forest (via
-  `ranger`, falling back to k-NN) under cross-validation tries to
-  tell reference draws from reconstructed draws; AUC of 0.5 means
-  indistinguishable.
+- **Classifier two-sample test (C2ST)** — a random forest via
+  `ranger::ranger()` under cross-validation tries to tell reference
+  draws from reconstructed draws; AUC of 0.5 means indistinguishable.
+  Pass `classifier = "knn"` for a k-NN alternative instead of the forest.
 
 ```r
 fidelity <- evaluate_compression(comp, reference_draws = draws)

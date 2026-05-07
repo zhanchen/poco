@@ -42,10 +42,10 @@ two-sample diagnostics:
   the regenerated sample is statistically indistinguishable from a
   fresh draw of the reference.
 - **Classifier two-sample test (C2ST)** (Lopez-Paz & Oquab, 2017): a
-  classifier (random forest via `ranger`, falling back to k-nearest
-  neighbours) is trained under cross-validation to discriminate
-  reference from reconstructed draws. AUC = 0.5 means indistinguishable;
-  the score is `100 * (1 - 2 * |AUC - 0.5|)`.
+  random forest (`ranger::ranger()`, default) is trained under
+  cross-validation to discriminate reference from reconstructed draws.
+  Use `classifier = "knn"` for a k-NN classifier instead. AUC = 0.5 means
+  indistinguishable; the score is `100 * (1 - 2 * |AUC - 0.5|)`.
 
 Both metrics work purely from samples returned by `sample_posterior()`;
 they never inspect the GMM weights or KDE bandwidths.
@@ -70,6 +70,13 @@ plot_overlay <- function(reference, recon, title) {
   ggplot(df, aes(x = .data[[cols[1]]], y = .data[[cols[2]]],
                  colour = source)) +
     geom_point(alpha = 0.3, size = 0.6) +
+    stat_ellipse(
+      aes(group = source),
+      type = "norm",
+      level = 0.68,
+      linewidth = 0.7,
+      linetype = 2
+    ) +
     scale_colour_manual(values = c(reference = "gray40",
                                    reconstructed = "firebrick")) +
     labs(title = title, x = cols[1], y = cols[2]) +
@@ -96,10 +103,7 @@ comp_full <- compress_posterior(
 )
 recon_full <- sample_posterior(comp_full, n_draws = 2000)
 
-fid_full <- evaluate_compression(
-  comp_full, draws,
-  classifier = "knn", seed = 1L
-)
+fid_full <- evaluate_compression(comp_full, draws, seed = 1L)
 fid_full
 ```
 
@@ -129,10 +133,7 @@ comp_diag <- compress_posterior(
 )
 recon_diag <- sample_posterior(comp_diag, n_draws = 2000)
 
-fid_diag <- evaluate_compression(
-  comp_diag, draws,
-  classifier = "knn", seed = 1L
-)
+fid_diag <- evaluate_compression(comp_diag, draws, seed = 1L)
 fid_diag
 ```
 
@@ -201,8 +202,8 @@ comp_one <- compress_posterior(bi, method = "mclust", n_components = 1L)
 recon_two <- sample_posterior(comp_two, n_draws = 3000)
 recon_one <- sample_posterior(comp_one, n_draws = 3000)
 
-fid_two <- evaluate_compression(comp_two, bi, classifier = "knn", seed = 1L)
-fid_one <- evaluate_compression(comp_one, bi, classifier = "knn", seed = 1L)
+fid_two <- evaluate_compression(comp_two, bi, seed = 1L)
+fid_one <- evaluate_compression(comp_one, bi, seed = 1L)
 ```
 
 ```{r demo3-plot, fig.width = 11, fig.height = 5, echo = FALSE}
@@ -219,6 +220,105 @@ modes - and the score drops from
 `r round(fid_two$reproduction_pct)`% to
 `r round(fid_one$reproduction_pct)`%. Once again, both metrics agree
 something is wrong.
+
+# Sanity check 4: Neal's funnel (hard geometry)
+
+Neal's funnel is a classic stress test: one dimension controls the scale
+of the others, creating a *narrow neck* and strong non-linear geometry.
+Even in two dimensions, a density approximation that looks reasonable in
+the bulk can struggle in the neck.
+
+We generate draws from the canonical funnel:
+
+- \(y \sim \mathcal{N}(0, 3)\)
+- \(x \mid y \sim \mathcal{N}(0, \exp(y/2))\)
+
+```{r funnel-data}
+set.seed(1)
+n_funnel <- 4000
+y <- rnorm(n_funnel, mean = 0, sd = 3)
+x <- rnorm(n_funnel, mean = 0, sd = exp(y / 2))
+funnel <- cbind(y = y, x = x)
+```
+
+```{r funnel-fit}
+# Higher-capacity model (near-optimal for this example)
+comp_funnel_rich <- compress_posterior(
+  funnel, method = "mclust", n_components = 8L
+)
+recon_funnel_rich <- sample_posterior(comp_funnel_rich, n_draws = 4000)
+fid_funnel_rich <- evaluate_compression(
+  comp_funnel_rich,
+  reference_draws = funnel,
+  seed        = 1L,
+  max_n       = 1200L,
+  n_self_reps = 10L
+)
+
+# Oversimplified model 1: single full-covariance Gaussian
+comp_funnel_one <- compress_posterior(
+  funnel, method = "mclust", n_components = 1L, model_name = "VVV"
+)
+recon_funnel_one <- sample_posterior(comp_funnel_one, n_draws = 4000)
+fid_funnel_one <- evaluate_compression(
+  comp_funnel_one,
+  reference_draws = funnel,
+  seed        = 1L,
+  max_n       = 1200L,
+  n_self_reps = 10L
+)
+
+# Oversimplified model 2: single diagonal Gaussian
+comp_funnel_diag <- compress_posterior(
+  funnel, method = "mclust", n_components = 1L,
+  model_name = c("EII", "VII", "EEI", "VEI", "EVI", "VVI")
+)
+recon_funnel_diag <- sample_posterior(comp_funnel_diag, n_draws = 4000)
+fid_funnel_diag <- evaluate_compression(
+  comp_funnel_diag,
+  reference_draws = funnel,
+  seed        = 1L,
+  max_n       = 1200L,
+  n_self_reps = 10L
+)
+
+data.frame(
+  model = c("8 components (richer)", "1 component full-cov", "1 component diagonal"),
+  reproduction = round(c(
+    fid_funnel_rich$reproduction_pct,
+    fid_funnel_one$reproduction_pct,
+    fid_funnel_diag$reproduction_pct
+  ), 1),
+  energy = round(c(
+    fid_funnel_rich$metrics$energy$reproduction_pct,
+    fid_funnel_one$metrics$energy$reproduction_pct,
+    fid_funnel_diag$metrics$energy$reproduction_pct
+  ), 1),
+  c2st = round(c(
+    fid_funnel_rich$metrics$c2st$reproduction_pct,
+    fid_funnel_one$metrics$c2st$reproduction_pct,
+    fid_funnel_diag$metrics$c2st$reproduction_pct
+  ), 1)
+)
+```
+
+```{r funnel-plot, fig.width = 15, fig.height = 5, echo = FALSE}
+plot_overlay(
+  funnel, recon_funnel_rich,
+  sprintf("Funnel: 8 components - %.1f%%", fid_funnel_rich$reproduction_pct)
+) +
+plot_overlay(
+  funnel, recon_funnel_one,
+  sprintf("Funnel: 1 full-cov - %.1f%%", fid_funnel_one$reproduction_pct)
+) +
+plot_overlay(
+  funnel, recon_funnel_diag,
+  sprintf("Funnel: 1 diagonal - %.1f%%", fid_funnel_diag$reproduction_pct)
+)
+```
+
+As expected, the richer model tracks the funnel geometry better, while
+oversimplified one-component fits smooth out the neck and lose shape.
 
 # Sanity sweep: reproduction vs the difficulty of the problem
 
@@ -238,7 +338,6 @@ sweep_one_rho <- function(rho, n = 1500, seed = 7L) {
   )
   fid <- evaluate_compression(
     comp, d,
-    classifier  = "knn",
     seed        = 1L,
     n_self_reps = 10L,
     max_n       = 800L
@@ -305,7 +404,6 @@ comp_train <- compress_posterior(
 fid_holdout <- evaluate_compression(
   comp_train,
   reference_draws = bi[-idx, ],
-  classifier      = "knn",
   seed            = 1L
 )
 fid_holdout

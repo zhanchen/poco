@@ -12,7 +12,7 @@ evaluate_compression(
   n_eval = NULL,
   max_n = 2000L,
   n_self_reps = 20L,
-  classifier = c("auto", "ranger", "knn"),
+  classifier = c("ranger", "knn"),
   cv_folds = 5L,
   seed = NULL,
   verbose = FALSE
@@ -41,9 +41,9 @@ at most this many rows. Default \code{2000}.}
 \item{n_self_reps}{Number of self-baseline replicates for the energy
 metric. Default \code{20}.}
 
-\item{classifier}{Classifier for C2ST. \code{"auto"} uses \code{ranger} if
-installed, else k-NN. \code{"ranger"} requires the \code{ranger} package.
-\code{"knn"} is dependency-free.}
+\item{classifier}{Classifier for C2ST. \code{"ranger"} (default) uses a
+random forest (\code{ranger::ranger()}). \code{"knn"} uses a k-NN probability
+estimate instead (no random forest).}
 
 \item{cv_folds}{Cross-validation folds for C2ST. Default \code{5}.}
 
@@ -85,7 +85,7 @@ envelope and the score decays as 1/ratio for larger
 distances.
 \item \strong{Classifier two-sample test (C2ST)} (Lopez-Paz &
 Oquab, 2017): trains a classifier (random forest via
-\code{ranger} when available, else k-NN) under cross-validation
+\code{ranger::ranger()} under cross-validation
 to discriminate reference draws from reconstructed draws and
 reports the out-of-fold ROC AUC. AUC = 0.5 means the two
 samples are indistinguishable; the score is mapped to
@@ -111,8 +111,7 @@ set.seed(1)
 draws <- matrix(rnorm(2000 * 3), ncol = 3,
                 dimnames = list(NULL, c("alpha", "beta", "sigma")))
 comp <- compress_posterior(draws, method = "mclust", n_components = 2)
-fidelity <- evaluate_compression(comp, reference_draws = draws,
-                                 classifier = "knn", seed = 1L)
+fidelity <- evaluate_compression(comp, reference_draws = draws, seed = 1L)
 fidelity
 
 }
