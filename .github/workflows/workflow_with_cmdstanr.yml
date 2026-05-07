@@ -9,6 +9,11 @@ on:
 
 name: workflow_with_cmdstanr
 
+# Required so JamesIves/github-pages-deploy-action can force-push to gh-pages
+# using secrets.GITHUB_TOKEN (default token is read-only otherwise).
+permissions:
+  contents: write
+
 jobs:
   workflow_with_cmdstanr:
     runs-on: ${{ matrix.config.os }}
