@@ -1,0 +1,337 @@
+---
+title: "Evaluating compression fidelity"
+output:
+  rmarkdown::html_vignette:
+    toc: true
+vignette: >
+  %\VignetteIndexEntry{Evaluating compression fidelity}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  collapse   = TRUE,
+  comment    = "#>",
+  fig.width  = 7,
+  fig.height = 4,
+  message    = FALSE,
+  warning    = FALSE
+)
+```
+
+Posterior compression is lossy by construction - just like JPEG for
+images. `evaluate_compression()` reports a **reproduction percentage**
+that quantifies how much information was lost, and it does so without
+being *circular*: the score does not reuse the same density model
+(`mclust`, `mvdens_gmm`, `mvdens_kde`) that performed the compression.
+
+This vignette walks through the metric on three sanity checks where the
+visual answer is obvious, then a sweep that pins down the metric's
+behaviour as we increase the difficulty of the problem.
+
+## Two non-circular yardsticks
+
+`evaluate_compression()` combines two distribution-free, sample-based,
+two-sample diagnostics:
+
+- **Energy distance** (Szekely & Rizzo, 2013): a multivariate distance
+  between two empirical samples that is zero iff the two distributions
+  match. It is anchored against a *bootstrap noise envelope* obtained
+  by resampling the reference draws, so a reproduction of 100% means
+  the regenerated sample is statistically indistinguishable from a
+  fresh draw of the reference.
+- **Classifier two-sample test (C2ST)** (Lopez-Paz & Oquab, 2017): a
+  classifier (random forest via `ranger`, falling back to k-nearest
+  neighbours) is trained under cross-validation to discriminate
+  reference from reconstructed draws. AUC = 0.5 means indistinguishable;
+  the score is `100 * (1 - 2 * |AUC - 0.5|)`.
+
+Both metrics work purely from samples returned by `sample_posterior()`;
+they never inspect the GMM weights or KDE bandwidths.
+
+## Setup
+
+```{r libs}
+library(poco)
+library(ggplot2)
+library(patchwork)
+library(mvtnorm)
+
+set.seed(1)
+```
+
+```{r helpers, include = FALSE}
+plot_overlay <- function(reference, recon, title) {
+  ref_df   <- data.frame(reference, source = "reference")
+  recon_df <- data.frame(recon,     source = "reconstructed")
+  df <- rbind(ref_df, recon_df)
+  cols <- colnames(reference)
+  ggplot(df, aes(x = .data[[cols[1]]], y = .data[[cols[2]]],
+                 colour = source)) +
+    geom_point(alpha = 0.3, size = 0.6) +
+    scale_colour_manual(values = c(reference = "gray40",
+                                   reconstructed = "firebrick")) +
+    labs(title = title, x = cols[1], y = cols[2]) +
+    theme_bw() +
+    theme(legend.position = "bottom")
+}
+```
+
+# Sanity check 1: a faithful compression
+
+A bivariate Gaussian with strong correlation, compressed with a single
+**full-covariance** Gaussian (the textbook right answer).
+
+```{r demo1-data}
+Sigma <- matrix(c(1.0, 0.7, 0.7, 1.0), 2, 2)
+draws <- rmvnorm(2000, mean = c(2, -1), sigma = Sigma)
+colnames(draws) <- c("alpha", "beta")
+```
+
+```{r demo1-fit}
+comp_full <- compress_posterior(
+  draws, method = "mclust",
+  n_components = 1L, model_name = "VVV"
+)
+recon_full <- sample_posterior(comp_full, n_draws = 2000)
+
+fid_full <- evaluate_compression(
+  comp_full, draws,
+  classifier = "knn", seed = 1L
+)
+fid_full
+```
+
+```{r demo1-plot, fig.width = 6, fig.height = 5, echo = FALSE}
+plot_overlay(
+  draws, recon_full,
+  sprintf("Faithful (full covariance) - %.1f%% reproduction",
+          fid_full$reproduction_pct)
+)
+```
+
+The reconstructed cloud is visually indistinguishable from the
+reference. Both metrics agree it is at the noise floor.
+
+# Sanity check 2: the killer test - lost correlation
+
+Now compress the **same** correlated posterior with a *diagonal-only*
+mclust model. By construction, every component has zero off-diagonal
+covariance, so any joint correlation between `alpha` and `beta` simply
+cannot be represented.
+
+```{r demo2-fit}
+comp_diag <- compress_posterior(
+  draws, method = "mclust",
+  n_components = 1L,
+  model_name = c("EII", "VII", "EEI", "VEI", "EVI", "VVI")
+)
+recon_diag <- sample_posterior(comp_diag, n_draws = 2000)
+
+fid_diag <- evaluate_compression(
+  comp_diag, draws,
+  classifier = "knn", seed = 1L
+)
+fid_diag
+```
+
+```{r demo2-plot, fig.width = 11, fig.height = 5, echo = FALSE}
+(plot_overlay(draws, recon_full,
+              sprintf("Full covariance: %.1f%%",
+                      fid_full$reproduction_pct)) +
+ plot_overlay(draws, recon_diag,
+              sprintf("Diagonal only: %.1f%%",
+                      fid_diag$reproduction_pct)))
+```
+
+Visually, the orange cloud on the right is *circular* where the gray
+reference is *elongated*: the reconstruction has lost the correlation.
+The empirical Pearson correlations confirm what the eye sees:
+
+```{r demo2-corr}
+data.frame(
+  source           = c("reference", "diagonal recon", "full recon"),
+  cor_alpha_beta   = c(cor(draws)[1, 2],
+                       cor(recon_diag)[1, 2],
+                       cor(recon_full)[1, 2])
+) |>
+  transform(cor_alpha_beta = round(cor_alpha_beta, 3))
+```
+
+The reproduction score drops from `r round(fid_full$reproduction_pct)`%
+to `r round(fid_diag$reproduction_pct)`% - and crucially, **both**
+metrics independently catch it (energy
+`r round(fid_diag$metrics$energy$reproduction_pct)`%, C2ST
+`r round(fid_diag$metrics$c2st$reproduction_pct)`%):
+
+```{r demo2-bothmetrics, echo = FALSE}
+data.frame(
+  metric                 = c("energy", "c2st", "headline"),
+  full_covariance        = round(c(
+    fid_full$metrics$energy$reproduction_pct,
+    fid_full$metrics$c2st$reproduction_pct,
+    fid_full$reproduction_pct
+  ), 1),
+  diagonal_only          = round(c(
+    fid_diag$metrics$energy$reproduction_pct,
+    fid_diag$metrics$c2st$reproduction_pct,
+    fid_diag$reproduction_pct
+  ), 1)
+)
+```
+
+# Sanity check 3: a collapsed mode
+
+A bimodal posterior, compressed with two or one components.
+
+```{r demo3-data}
+m1 <- rmvnorm(1500, mean = c(-2, -1),
+              sigma = matrix(c(0.4, 0.0, 0.0, 0.3), 2, 2))
+m2 <- rmvnorm(1500, mean = c( 2,  1),
+              sigma = matrix(c(0.3, 0.0, 0.0, 0.5), 2, 2))
+bi  <- rbind(m1, m2)
+colnames(bi) <- c("alpha", "beta")
+```
+
+```{r demo3-fits}
+comp_two <- compress_posterior(bi, method = "mclust", n_components = 2L)
+comp_one <- compress_posterior(bi, method = "mclust", n_components = 1L)
+
+recon_two <- sample_posterior(comp_two, n_draws = 3000)
+recon_one <- sample_posterior(comp_one, n_draws = 3000)
+
+fid_two <- evaluate_compression(comp_two, bi, classifier = "knn", seed = 1L)
+fid_one <- evaluate_compression(comp_one, bi, classifier = "knn", seed = 1L)
+```
+
+```{r demo3-plot, fig.width = 11, fig.height = 5, echo = FALSE}
+(plot_overlay(bi, recon_two,
+              sprintf("2 components: %.1f%%",
+                      fid_two$reproduction_pct)) +
+ plot_overlay(bi, recon_one,
+              sprintf("1 component (mode collapse): %.1f%%",
+                      fid_one$reproduction_pct)))
+```
+
+The single-component reconstruction visibly *bridges* the two real
+modes - and the score drops from
+`r round(fid_two$reproduction_pct)`% to
+`r round(fid_one$reproduction_pct)`%. Once again, both metrics agree
+something is wrong.
+
+# Sanity sweep: reproduction vs the difficulty of the problem
+
+If the metric is doing its job, increasing the *true* correlation
+should make a diagonal-only compression progressively worse. We sweep
+the correlation from 0 to 0.95 and watch the reproduction score.
+
+```{r sweep, fig.width = 8, fig.height = 4}
+sweep_one_rho <- function(rho, n = 1500, seed = 7L) {
+  set.seed(seed)
+  S <- matrix(c(1, rho, rho, 1), 2, 2)
+  d <- rmvnorm(n, sigma = S)
+  colnames(d) <- c("alpha", "beta")
+  comp <- compress_posterior(
+    d, method = "mclust", n_components = 1L,
+    model_name = c("EII", "VII", "EEI", "VEI", "EVI", "VVI")
+  )
+  fid <- evaluate_compression(
+    comp, d,
+    classifier  = "knn",
+    seed        = 1L,
+    n_self_reps = 10L,
+    max_n       = 800L
+  )
+  data.frame(
+    rho      = rho,
+    energy   = fid$metrics$energy$reproduction_pct,
+    c2st     = fid$metrics$c2st$reproduction_pct,
+    headline = fid$reproduction_pct
+  )
+}
+
+rhos <- seq(0, 0.95, by = 0.05)
+sweep_df <- do.call(rbind, lapply(rhos, sweep_one_rho))
+
+sweep_long <- rbind(
+  data.frame(rho = sweep_df$rho, metric = "energy",
+             pct = sweep_df$energy),
+  data.frame(rho = sweep_df$rho, metric = "c2st",
+             pct = sweep_df$c2st),
+  data.frame(rho = sweep_df$rho, metric = "headline (mean)",
+             pct = sweep_df$headline)
+)
+
+ggplot(sweep_long, aes(x = rho, y = pct, colour = metric)) +
+  geom_hline(yintercept = 100, linetype = 3, colour = "gray70") +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 1.5) +
+  scale_colour_manual(values = c(
+    "energy"           = "steelblue",
+    "c2st"             = "firebrick",
+    "headline (mean)"  = "gray30"
+  )) +
+  scale_y_continuous(limits = c(0, 105),
+                     breaks = seq(0, 100, by = 20)) +
+  labs(
+    title    = "Diagonal-only compression: fidelity drops as correlation grows",
+    subtitle = "Both metrics independently track the lost joint structure",
+    x        = expression("True correlation " * rho),
+    y        = "reproduction (%)",
+    colour   = "metric"
+  ) +
+  theme_bw()
+```
+
+Both energy and C2ST decrease monotonically with the strength of the
+joint structure that the diagonal model cannot capture. At `rho = 0`
+the diagonal model *is* the truth and reproduction sits at 100%; by
+`rho = 0.95` the metric correctly reports a substantial loss.
+
+# Strict out-of-sample evaluation
+
+If you want to rule out any residual concern that the GMM has seen the
+reference draws (it has, because we fit on the same `draws`), split
+*before* fitting:
+
+```{r holdout}
+n   <- nrow(bi)
+idx <- sample.int(n, size = floor(0.8 * n))
+comp_train <- compress_posterior(
+  bi[idx, ], method = "mclust", n_components = 2L
+)
+
+fid_holdout <- evaluate_compression(
+  comp_train,
+  reference_draws = bi[-idx, ],
+  classifier      = "knn",
+  seed            = 1L
+)
+fid_holdout
+```
+
+The interpretation is identical, but the reference is data the GMM
+never saw. Useful as a final sign-off that the score is not
+optimistically biased.
+
+# Wrap-up
+
+`evaluate_compression()` gives you:
+
+- a **single, interpretable number** (`reproduction_pct`) suitable for
+  reporting alongside compressed posteriors;
+- two **independent** corroborating metrics (energy distance and
+  C2ST), so a single high score is unlikely to be a fluke;
+- a workflow that is **backend-agnostic**: the same function works
+  identically for `mclust`, `mvdens_gmm`, and `mvdens_kde` outputs.
+
+The sanity checks above are also a useful template for authors of new
+compression backends to verify that a method has not silently lost
+correlation, multimodality, or any other joint structure.
+
+## Session info
+
+```{r si}
+sessionInfo()
+```

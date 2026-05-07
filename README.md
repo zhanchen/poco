@@ -51,6 +51,8 @@ consumed by:
 
 - `sample_posterior()` - regenerate draws (any number),
 - `density_posterior()` - evaluate p.d.f. (or log p.d.f.) at given points,
+- `evaluate_compression()` - quantify how much information was lost
+  (a "98.3% reproduction"-style score, see below),
 - `reconstruct_brmsfit()` / `reconstruct_sccomp()` - rebuild a usable
   fit object so the standard post-processing keeps working.
 
@@ -117,6 +119,48 @@ new_draws <- sample_posterior(comp, n_draws = 4000)
 
 `compression_methods()` returns the current set.
 
+## How much information was lost?
+
+Like JPEG quality scores, `evaluate_compression()` reports a
+`reproduction %` for the compressed posterior. It uses two
+*backend-independent* two-sample diagnostics on samples regenerated
+from the compressed object versus the reference draws — so the score
+is not circular (it doesn't reuse the same density model that did the
+compression):
+
+- **Energy distance** (Szekely & Rizzo) anchored against a bootstrap
+  Monte Carlo noise envelope from the reference itself.
+- **Classifier two-sample test (C2ST)** — a random forest (via
+  `ranger`, falling back to k-NN) under cross-validation tries to
+  tell reference draws from reconstructed draws; AUC of 0.5 means
+  indistinguishable.
+
+```r
+fidelity <- evaluate_compression(comp, reference_draws = draws)
+fidelity
+#> <compression_fidelity>
+#>   method        : mclust
+#>   parameters    : 3
+#>   reference n   : 1500
+#>   eval n        : 1500
+#>   ----------------------------------------
+#>   energy        : 100.0% reproduction
+#>     distance    : 0.054   noise envelope (q90): 0.062   ratio: 0.87x
+#>   C2ST          :  97.7% reproduction
+#>     AUC         : 0.511   classifier: ranger   cv_folds: 5
+#>   ----------------------------------------
+#>   reproduction  : 98.9%
+```
+
+For a strict out-of-sample evaluation, hold the reference draws out
+*before* fitting:
+
+```r
+idx  <- sample.int(nrow(draws), 0.8 * nrow(draws))
+comp <- compress_posterior(draws[idx, ], method = "mclust")
+evaluate_compression(comp, reference_draws = draws[-idx, ])
+```
+
 ## Vignettes
 
 - `vignette("introduction", package = "poco")` - hello world,
@@ -129,6 +173,9 @@ new_draws <- sample_posterior(comp, n_draws = 4000)
   `sccomp` workflow.
 - `vignette("methods-benchmark", package = "poco")` - side-by-side
   comparison of the supported compression methods.
+- `vignette("evaluate-compression", package = "poco")` - measure
+  reproduction quality with `evaluate_compression()` (sanity checks
+  on lost correlation, mode collapse, and a sliding-difficulty sweep).
 
 ## License
 

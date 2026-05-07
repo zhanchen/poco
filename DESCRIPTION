@@ -26,7 +26,8 @@ Imports:
     utils,
     methods,
     cli,
-    rlang
+    rlang,
+    ranger
 Suggests:
     posterior,
     cmdstanr,

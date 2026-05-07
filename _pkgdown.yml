@@ -4,5 +4,6 @@ articles:
     contents:
       - introduction
       - methods-benchmark
+      - evaluate-compression
       - compress-funnel
       - compress-brms
