@@ -1,5 +1,21 @@
 navbar:
-  title: "<img src='https://raw.githubusercontent.com/MangiolaLaboratory/poco/main/inst/poco_logo.png' alt='poco logo' height='28' style='vertical-align: middle; margin-right: 8px;'/>poco"
+  title: "<img src='https://raw.githubusercontent.com/stemangiola/poco/main/inst/poco_logo.png' alt='poco logo' height='28' style='vertical-align: middle; margin-right: 8px;'/> poco"
+  structure:
+    left: [reference, articles]
+  components:
+    articles:
+      text: Articles
+      menu:
+        - text: Introduction
+          href: articles/introduction.html
+        - text: Methods benchmark
+          href: articles/methods-benchmark.html
+        - text: Evaluate compression
+          href: articles/evaluate-compression.html
+        - text: Compress funnel
+          href: articles/compress-funnel.html
+        - text: Compress brms
+          href: articles/compress-brms.html
 
 # Article order on the pkgdown/GitHub Pages site ("Articles" menu).
 articles:

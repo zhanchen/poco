@@ -50,8 +50,8 @@ Additional_repositories:
 Remotes:
     github::NKI-CCB/mvdens,
     stan-dev/cmdstanr
-URL: https://github.com/MangiolaLaboratory/poco
-BugReports: https://github.com/MangiolaLaboratory/poco/issues
+URL: https://github.com/stemangiola/poco
+BugReports: https://github.com/stemangiola/poco/issues
 Config/testthat/edition: 3
 RoxygenNote: 7.3.3
 VignetteBuilder: knitr

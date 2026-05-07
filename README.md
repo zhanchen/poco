@@ -34,7 +34,7 @@ A 10-component Gaussian mixture in 1000 dimensions stores only
 
 ```r
 # install.packages("remotes")
-remotes::install_github("MangiolaLaboratory/poco")
+remotes::install_github("stemangiola/poco")
 ```
 
 `brms` / `cmdstanr` / `sccomp` are *Suggested* dependencies; you only
