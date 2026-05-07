@@ -24,6 +24,7 @@ Imports:
     mvtnorm,
     stats,
     utils,
+    methods,
     cli,
     rlang
 Suggests:
@@ -33,6 +34,9 @@ Suggests:
     sccomp,
     mvdens,
     microbenchmark,
+    bayesplot,
+    dplyr,
+    scales,
     ggplot2,
     ggside,
     patchwork,
