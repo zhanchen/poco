@@ -19,11 +19,14 @@ LazyData: true
 Depends:
     R (>= 4.1.0)
 Imports:
+    instantiate (>= 0.2.3),
     mclust,
     mvtnorm,
     stats,
     utils,
-    cli
+    methods,
+    cli,
+    rlang
 Suggests:
     posterior,
     cmdstanr,
@@ -31,6 +34,9 @@ Suggests:
     sccomp,
     mvdens,
     microbenchmark,
+    bayesplot,
+    dplyr,
+    scales,
     ggplot2,
     ggdendro,
     ggside,
@@ -38,6 +44,7 @@ Suggests:
     knitr,
     rmarkdown,
     testthat (>= 3.0.0)
+SystemRequirements: CmdStan (https://mc-stan.org/users/interfaces/cmdstan)
 Additional_repositories:
     https://mc-stan.org/r-packages/
 Remotes:

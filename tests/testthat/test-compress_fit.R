@@ -4,8 +4,13 @@ test_that("compress_fit rejects non-fit / non-character inputs", {
 })
 
 test_that("compress_fit reads cmdstan CSVs (smoke test)", {
+  # Same gate as vignettes: rworkflows has no CmdStan; workflow_with_cmdstanr
+  # installs it and runs this test in full.
+  skip_if_not(
+    instantiate::stan_cmdstan_exists(),
+    "CmdStan not installed (full Stan coverage runs in workflow_with_cmdstanr)"
+  )
   expect_true(requireNamespace("cmdstanr", quietly = TRUE))
-  expect_no_error(cmdstanr::cmdstan_path())
 
   stan_code <- "
 data { int<lower=1> N; vector[N] y; }

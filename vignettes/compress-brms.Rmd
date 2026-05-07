@@ -18,8 +18,6 @@ knitr::opts_chunk$set(
 )
 ```
 
-
-
 This vignette walks through the full workflow for compressing a
 `brms::brmsfit`, then reconstructing it for use with the standard
 `brms` post-processing functions (`predict()`, `posterior_predict()`,
@@ -30,12 +28,23 @@ CmdStan install.
 library(poco)
 ```
 
+The chunks below that fit Stan models are gated with
+`instantiate::stan_cmdstan_exists()`, so the vignette still builds on
+machines that do not have CmdStan installed (e.g. CI runners). Install
+CmdStan once with:
+
+```{r install-cmdstan, eval = FALSE}
+poco::check_and_install_cmdstanr()
+cmdstanr::check_cmdstan_toolchain(fix = TRUE)
+cmdstanr::install_cmdstan()
+```
+
 ## Fit a brms model
 
 The model **must** use the cmdstanr backend so that
 `compress_brmsfit()` can reach the CSV draws.
 
-```{r fit_brms}
+```{r fit_brms, eval = instantiate::stan_cmdstan_exists()}
 library(brms)
 library(dplyr)
 
@@ -63,7 +72,7 @@ A single call returns both the compressed posterior and the brms fit
 structure. Save them separately so the structure can be reused with any
 future updates to the compressed posterior.
 
-```{r compress}
+```{r compress, eval = instantiate::stan_cmdstan_exists()}
 result <- compress_brmsfit(
   fit,
   method       = "mclust",
@@ -78,16 +87,15 @@ re-attached.
 
 ## Reconstruct and use the model
 
-```{r reconstruct}
+```{r reconstruct, eval = instantiate::stan_cmdstan_exists()}
 
 fit_recon <- reconstruct_brmsfit(result)
 
-# Now use brms machinery as normal:
 new_data <- data.frame(x = seq(-2, 2, length.out = 20),
                        group = rep(1:5, each = 4))
 
-p = predict(fit_recon, newdata = new_data)
-pp = posterior_predict(fit_recon, newdata = new_data)
+p  <- predict(fit_recon, newdata = new_data)
+pp <- posterior_predict(fit_recon, newdata = new_data)
 ```
 
 ## Compare pairwise posterior geometry
@@ -95,15 +103,15 @@ pp = posterior_predict(fit_recon, newdata = new_data)
 Use `bayesplot::mcmc_pairs()` to compare the original and reconstructed
 draw geometry on the same subset of parameters.
 
-```{r pairs}
+```{r pairs, eval = instantiate::stan_cmdstan_exists()}
 library(bayesplot)
 
 pair_pars <- c("b_Intercept", "b_x", "sd_group__Intercept", "sigma")
 
-draws_orig <- posterior::as_draws_array(fit, variable = pair_pars)
+draws_orig  <- posterior::as_draws_array(fit, variable = pair_pars)
 draws_recon <- posterior::as_draws_array(fit_recon, variable = pair_pars)
 
-bayesplot::mcmc_pairs(draws_orig, pars = pair_pars)
+bayesplot::mcmc_pairs(draws_orig,  pars = pair_pars)
 bayesplot::mcmc_pairs(draws_recon, pars = pair_pars)
 ```
 
@@ -115,7 +123,7 @@ draws.
 `compress_brmsfit()` shares the same `method` argument as
 `compress_posterior()`. To use a different backend, e.g. mvdens GMM:
 
-```{r mvdens}
+```{r mvdens, eval = instantiate::stan_cmdstan_exists() && requireNamespace("mvdens", quietly = TRUE)}
 result <- compress_brmsfit(
   fit,
   method       = "mvdens_gmm",
