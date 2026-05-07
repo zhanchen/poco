@@ -4,6 +4,12 @@
 [![Lifecycle:experimental](https://lifecycle.r-lib.org/articles/figures/lifecycle-experimental.svg)](https://lifecycle.r-lib.org/articles/stages.html#experimental)
 <!-- badges: end -->
 
+<p align="left">
+  <img src="inst/poco_logo.png" alt="poco logo" style="width: 200px; border-radius: 12px; border: 1px solid rgba(159, 122, 234, 0.35);" />
+</p>
+
+---
+
 `poco` (POsterior COmpression, "little" in Italian) provides a small, unified API for compressing MCMC
 posterior draws into compact density approximations (Gaussian mixture
 models, kernel density estimates), regenerating samples on demand, and

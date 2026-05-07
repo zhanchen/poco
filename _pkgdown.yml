@@ -1,3 +1,6 @@
+navbar:
+  title: "<img src='https://raw.githubusercontent.com/MangiolaLaboratory/poco/main/inst/poco_logo.png' alt='poco logo' height='28' style='vertical-align: middle; margin-right: 8px;'/>poco"
+
 # Article order on the pkgdown/GitHub Pages site ("Articles" menu).
 articles:
   - title: Articles
