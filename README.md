@@ -5,7 +5,7 @@
 <!-- badges: end -->
 
 <p align="left">
-  <img src="inst/poco_logo.png" alt="poco logo" style="width: 200px; border-radius: 12px; border: 1px solid rgba(159, 122, 234, 0.35);" />
+  <img src="https://raw.githubusercontent.com/stemangiola/poco/main/inst/poco_logo.png" alt="poco logo" style="width: 200px; border-radius: 12px; border: 1px solid rgba(159, 122, 234, 0.35);" />
 </p>
 
 ---
