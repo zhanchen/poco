@@ -125,3 +125,118 @@ test_that("partition_parameters_clusters interprets min_size in (0,1) as proport
   expect_equal(pc$params$min_size, as.integer(ceiling(prop * n)))
   expect_equal(pc$params$min_size_proportion, prop)
 })
+
+test_that("partition_parameters_clusters clamps integer min_size below 2", {
+  draws <- make_block_draws()
+  cm <- posterior_correlation(draws)
+  expect_warning(
+    pc <- partition_parameters_clusters(cm, threshold = 0.5, min_size = 1L),
+    "minimum allowed effective cluster size is 2"
+  )
+  expect_equal(pc$params$min_size, 2L)
+})
+
+test_that("partition_parameters_clusters clamps tiny proportional min_size below 2", {
+  draws <- make_block_draws()
+  cm <- posterior_correlation(draws)
+  prop <- 0.01
+  expect_warning(
+    pc <- suppressMessages(
+      partition_parameters_clusters(cm, threshold = 0.5, min_size = prop)
+    ),
+    "minimum allowed effective cluster size is 2"
+  )
+  expect_equal(pc$params$min_size, 2L)
+  expect_equal(pc$params$min_size_proportion, prop)
+})
+
+test_that("partition_parameters_clusters autocorrects negative count min_size", {
+  draws <- make_block_draws()
+  cm <- posterior_correlation(draws)
+  expect_warning(
+    pc <- partition_parameters_clusters(cm, threshold = 0.5, min_size = -3),
+    "negative"
+  )
+  expect_equal(pc$params$min_size, 3L)
+})
+
+test_that("partition_parameters_clusters autocorrects non-integer count min_size", {
+  draws <- make_block_draws()
+  cm <- posterior_correlation(draws)
+  expect_warning(
+    pc <- partition_parameters_clusters(cm, threshold = 0.5, min_size = 3.2),
+    "ceiling"
+  )
+  expect_equal(pc$params$min_size, 4L)
+})
+
+test_that("partition_parameters_clusters force_remainder sends names to remainder", {
+  draws <- make_block_draws()
+  cm <- posterior_correlation(draws)
+  pc <- partition_parameters_clusters(
+    cm,
+    threshold       = 0.5,
+    min_size        = 2L,
+    force_remainder = c("a1", "a2", "a3")
+  )
+  expect_true(all(c("a1", "a2", "a3") %in% pc$remainder))
+  in_blocks <- unlist(pc$blocks, use.names = FALSE)
+  expect_false(any(c("a1", "a2", "a3") %in% in_blocks))
+  expect_equal(
+    sort(unique(names(pc$cluster_id[is.na(pc$cluster_id)]))),
+    sort(pc$remainder)
+  )
+  expect_equal(pc$params$force_remainder, c("a1", "a2", "a3"))
+})
+
+test_that("partition_parameters_clusters force_remainder accepts tidyselect", {
+  draws <- make_block_draws()
+  cm <- posterior_correlation(draws)
+  pc <- partition_parameters_clusters(
+    cm,
+    threshold       = 0.5,
+    min_size        = 2L,
+    force_remainder = tidyselect::starts_with("a")
+  )
+  expect_true(all(c("a1", "a2", "a3") %in% pc$remainder))
+  in_blocks <- unlist(pc$blocks, use.names = FALSE)
+  expect_false(any(c("a1", "a2", "a3") %in% in_blocks))
+})
+
+test_that(".pick_cluster_label_row_per_id keeps one row per cluster id", {
+  rect_df <- data.frame(
+    cluster_id = c(2L, 2L, 1L),
+    xmin       = c(0.5, 10.5, 0.5),
+    xmax       = c(3.5, 12.5, 2.5),
+    ymin       = c(0.5, 10.5, 0.5),
+    ymax       = c(3.5, 12.5, 2.5),
+    cluster_lab = I(c("b", "b", "a"))
+  )
+  out <- poco:::.pick_cluster_label_row_per_id(rect_df)
+  expect_equal(nrow(out), 2L)
+  expect_equal(sort(out$cluster_id), c(1L, 2L))
+  # id 2: larger area is the second run (wider span on axes)
+  expect_true(out$xmin[out$cluster_id == 2L] > 5)
+})
+
+test_that(".pick_cluster_label_row_per_id dedupes by display name", {
+  rect_df <- data.frame(
+    cluster_id  = c(2L, 99L),
+    xmin        = c(0.5, 10.5),
+    xmax        = c(2.5, 12.5),
+    ymin        = c(0.5, 10.5),
+    ymax        = c(2.5, 12.5),
+    cluster_lab = I(c("cluster_2", "cluster_2"))
+  )
+  out <- poco:::.pick_cluster_label_row_per_id(rect_df)
+  expect_equal(nrow(out), 1L)
+})
+
+test_that(".auto_cluster_heatmap_annotation respects cluster and size heuristics", {
+  ann <- poco:::.auto_cluster_heatmap_annotation(3L, 300L)
+  expect_true(ann$show_cluster_labels)
+  expect_true(ann$show_cluster_legend)
+  ann2 <- poco:::.auto_cluster_heatmap_annotation(20L, 300L)
+  expect_false(ann2$show_cluster_labels)
+  expect_false(ann2$show_cluster_legend)
+})

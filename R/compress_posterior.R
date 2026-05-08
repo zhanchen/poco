@@ -26,15 +26,29 @@
 #'   "VVI")` are used when `nrow(draws) <= ncol(draws)` so covariances
 #'   remain identifiable, otherwise mclust's full default set is used
 #'   and BIC picks the best.
-#' @param verbose Logical; print backend progress. Default `FALSE`.
-#' @param partition Optional [partition_parameters_clusters()] output. When
-#'   supplied, the posterior is compressed **blockwise**: each cluster is
-#'   fitted on its own (typically with a richer covariance family,
+#' @param verbose Logical; print blockwise progress messages. Default `FALSE`
+#'   (silent). When `TRUE` and blockwise `partition` is used: prints whether
+#'   cluster blocks run in parallel or sequentially, worker count
+#'   (BiocParallel), enables the BiocParallel **progress bar** when supported
+#'   (`progressbar` on `MulticoreParam` / `SnowParam`), prints cluster-fit
+#'   completion counts in sequential mode, and reports the remainder block.
+#'   Backend (`mclust` / `mvdens`) fitting is kept silent inside blockwise mode.
+#' @param partition Optional [partition_parameters_clusters()] output, or a
+#'   **manual** cluster list from [partition_blocks()] / a plain `list()` of
+#'   character vectors (see [partition_blocks()]). When supplied, the posterior
+#'   is compressed **blockwise**: each cluster is fitted on its own
+#'   (typically with a richer covariance family,
 #'   `cluster_model_name`), the **remainder** is fitted with the cheaper
 #'   diagonal `remainder_model_name`, and the per-block fits are wrapped in
 #'   a `posterior_compressed_blockwise` object. Blocks are then assumed to
 #'   be independent (within-block correlations preserved, between-block
 #'   correlations dropped).
+#'
+#'   Names are aligned to the draws **before** fitting: any partition entry
+#'   absent from the draws is **dropped** with [warning()], and any draw
+#'   column not appearing in a cluster or in `remainder` is **added to
+#'   remainder** with [warning()]. This helps when the partition was built on
+#'   a different variable set than `variables` / the `brmsfit` posterior.
 #' @param cluster_model_name `mclust` covariance structure to use for the
 #'   *cluster* blocks when `partition` is provided. If `NULL` (default) and
 #'   `method = "mclust"`, `poco` restricts BIC selection to the
@@ -45,6 +59,23 @@
 #'   *remainder* block when `partition` is provided. If `NULL` (default) and
 #'   `method = "mclust"`, `poco` restricts BIC selection to the
 #'   **diagonal/spherical** families (`EII`/`VII`/`EEI`/`EVI`/`VEI`/`VVI`).
+#' @param cluster_BPPARAM How to run **cluster** block fits when `partition` is
+#'   set (the **remainder** block is always fitted afterward in the main
+#'   process). One of:
+#'   \describe{
+#'     \item{`NULL` (default)}{**Automatic.** If **BiocParallel** is installed
+#'       and there are at least two cluster blocks, cluster blocks are
+#'       compressed in parallel via `BiocParallel::bplapply()` with worker count
+#'       `min(n_cluster_blocks, max(1, parallel::detectCores() - 1))` (on
+#'       Windows `SnowParam`, else `MulticoreParam`). If **BiocParallel** is not
+#'       installed, a [message()] encourages installation and blocks are fitted
+#'       **sequentially** (no error). With fewer than two cluster blocks,
+#'       parallel is skipped.}
+#'     \item{`FALSE`}{**Sequential:** always compress cluster blocks one by one,
+#'       even if **BiocParallel** is installed.}
+#'     \item{`BiocParallelParam`}{Use that object as `BPPARAM` in
+#'       `BiocParallel::bplapply()` (requires **BiocParallel** to be installed).}
+#'   }
 #' @param ... Additional arguments forwarded to the backend (e.g.
 #'   [mclust::Mclust()]).
 #'
@@ -56,7 +87,7 @@
 #'
 #' @seealso [compress_fit()], [compress_brmsfit()], [compress_sccomp()],
 #'   [sample_posterior()], [density_posterior()],
-#'   [partition_parameters_clusters()].
+#'   [partition_parameters_clusters()], [partition_blocks()].
 #'
 #' @examples
 #' set.seed(1)
@@ -78,6 +109,7 @@ compress_posterior <- function(
     partition            = NULL,
     cluster_model_name   = NULL,
     remainder_model_name = NULL,
+    cluster_BPPARAM      = NULL,
     ...) {
   method <- .match_method(method)
   draws_mat <- .as_draws_matrix(draws, variables = variables)
@@ -91,6 +123,7 @@ compress_posterior <- function(
       cluster_model_name   = cluster_model_name,
       remainder_model_name = remainder_model_name,
       verbose              = verbose,
+      cluster_BPPARAM      = cluster_BPPARAM,
       ...
     ))
   }
@@ -225,7 +258,7 @@ compress_fit <- function(
 #'   }
 #'
 #' @seealso [reconstruct_brmsfit()], [sample_posterior()],
-#'   [partition_parameters_clusters()].
+#'   [partition_parameters_clusters()], [partition_blocks()].
 #'
 #' @examples
 #' \dontrun{
@@ -264,6 +297,7 @@ compress_brmsfit <- function(
     partition            = NULL,
     cluster_model_name   = NULL,
     remainder_model_name = NULL,
+    cluster_BPPARAM      = NULL,
     ...) {
   method <- .match_method(method)
 
@@ -310,6 +344,7 @@ compress_brmsfit <- function(
     partition            = partition,
     cluster_model_name   = cluster_model_name,
     remainder_model_name = remainder_model_name,
+    cluster_BPPARAM      = cluster_BPPARAM,
     ...
   )
 

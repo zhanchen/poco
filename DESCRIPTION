@@ -26,7 +26,8 @@ Imports:
     utils,
     methods,
     cli,
-    rlang
+    rlang,
+    tidyselect
 Suggests:
     posterior,
     cmdstanr,
@@ -43,7 +44,8 @@ Suggests:
     patchwork,
     knitr,
     rmarkdown,
-    testthat (>= 3.0.0)
+    testthat (>= 3.0.0),
+    BiocParallel
 SystemRequirements: CmdStan (https://mc-stan.org/users/interfaces/cmdstan)
 Additional_repositories:
     https://mc-stan.org/r-packages/

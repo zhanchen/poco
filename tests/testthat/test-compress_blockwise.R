@@ -244,3 +244,180 @@ test_that("blockwise integrates with reconstruct_brmsfit() (full round-trip)", {
   }
   expect_no_error(capture.output(print(recon)))
 })
+
+test_that("plain list of character vectors coerces to blockwise partition", {
+  draws <- make_blockwise_draws()
+  part <- list(
+    c("g1_a", "g1_b", "g1_c"),
+    c("g2_a", "g2_b", "g2_c")
+  )
+  comp <- compress_posterior(
+    draws,
+    method               = "mclust",
+    n_components         = 2L,
+    partition            = part,
+    remainder_model_name = "VVI"
+  )
+  expect_s3_class(comp, "posterior_compressed_blockwise")
+  rem <- comp$blocks$remainder
+  expect_setequal(rem$param_names, c("r1", "r2", "r3", "r4"))
+})
+
+test_that("partition_blocks() resolves tidyselect against draws colnames", {
+  draws <- make_blockwise_draws()
+  pb <- partition_blocks(
+    c("g1_a", "g1_b", "g1_c"),
+    tidyselect::starts_with("g2_"),
+    c("r1", "r2")
+  )
+  comp <- compress_posterior(
+    draws,
+    method               = "mclust",
+    n_components         = 2L,
+    partition            = pb,
+    remainder_model_name = "VVI"
+  )
+  expect_s3_class(comp, "posterior_compressed_blockwise")
+  b1 <- comp$blocks[[1]]
+  expect_setequal(b1$param_names, c("g1_a", "g1_b", "g1_c"))
+  b2 <- comp$blocks[[2]]
+  expect_setequal(b2$param_names, c("g2_a", "g2_b", "g2_c"))
+  rem <- comp$blocks$remainder
+  expect_true(all(c("r1", "r2") %in% rem$param_names))
+  expect_true("r3" %in% rem$param_names && "r4" %in% rem$param_names)
+})
+
+test_that("plain list may include a formula with tidyselect on RHS", {
+  draws <- make_blockwise_draws()
+  part <- list(
+    c("g1_a", "g1_b", "g1_c"),
+    ~ tidyselect::starts_with("g2_")
+  )
+  comp <- compress_posterior(
+    draws,
+    method       = "mclust",
+    n_components = 2L,
+    partition    = part
+  )
+  expect_s3_class(comp, "posterior_compressed_blockwise")
+  expect_equal(length(comp$cluster_block_names), 2L)
+})
+
+test_that("overlap between manual blocks respects declaration order", {
+  draws <- make_blockwise_draws()
+  pb <- partition_blocks(
+    c("g1_a", "g2_a"),
+    c("g2_a", "g2_b", "g2_c")
+  )
+  comp <- compress_posterior(
+    draws,
+    method       = "mclust",
+    n_components = 2L,
+    partition    = pb
+  )
+  b2 <- comp$blocks[[2]]
+  expect_false("g2_a" %in% b2$param_names)
+  expect_true(all(c("g2_b", "g2_c") %in% b2$param_names))
+})
+
+test_that("partition names absent from draws are ignored with warning", {
+  draws <- make_blockwise_draws()
+  part <- list(
+    c("g1_a", "g1_b", "g1_c", "ghost_a", "ghost_b"),
+    c("g2_a", "g2_b", "g2_c")
+  )
+  expect_warning(
+    comp <- compress_posterior(
+      draws,
+      method       = "mclust",
+      n_components = 2L,
+      partition    = part
+    ),
+    "not found in draws"
+  )
+  expect_s3_class(comp, "posterior_compressed_blockwise")
+  expect_false(any(c("ghost_a", "ghost_b") %in% comp$param_names))
+})
+
+test_that("draw columns missing from partition are added to remainder with warning", {
+  draws <- make_blockwise_draws()
+  part <- structure(
+    list(
+      blocks    = list(
+        cluster_1 = c("g1_a", "g1_b", "g1_c"),
+        cluster_2 = c("g2_a", "g2_b", "g2_c")
+      ),
+      remainder = character(0)
+    ),
+    class = c("poco_partition_clusters", "list")
+  )
+  expect_warning(
+    comp <- compress_posterior(
+      draws,
+      method       = "mclust",
+      n_components = 2L,
+      partition    = part
+    ),
+    "not listed in any cluster or remainder"
+  )
+  rem <- comp$blocks$remainder
+  expect_true(all(c("r1", "r2", "r3", "r4") %in% rem$param_names))
+})
+
+test_that("poco_partition_clusters: names only in partition are dropped with warning", {
+  draws <- make_blockwise_draws()
+  part <- structure(
+    list(
+      blocks = list(
+        cluster_1 = c("g1_a", "g1_b", "g1_c", "phantom_x"),
+        cluster_2 = c("g2_a", "g2_b", "g2_c")
+      ),
+      remainder = c("r1", "r2", "r3", "r4", "phantom_y")
+    ),
+    class = c("poco_partition_clusters", "list")
+  )
+  expect_warning(
+    comp <- compress_posterior(
+      draws,
+      method       = "mclust",
+      n_components = 2L,
+      partition    = part
+    ),
+    "not present in draws"
+  )
+  expect_false(any(c("phantom_x", "phantom_y") %in% unlist(
+    lapply(comp$blocks, function(b) b$param_names),
+    use.names = FALSE
+  )))
+})
+
+test_that("blockwise compress_posterior runs with explicit cluster_BPPARAM", {
+  skip_if_not_installed("BiocParallel")
+  draws <- make_blockwise_draws()
+  cm    <- posterior_correlation(draws)
+  part  <- partition_parameters_clusters(cm, threshold = 0.5, min_size = 2L)
+  comp <- compress_posterior(
+    draws,
+    method          = "mclust",
+    n_components    = 2L,
+    partition       = part,
+    cluster_BPPARAM = BiocParallel::SerialParam()
+  )
+  expect_s3_class(comp, "posterior_compressed_blockwise")
+  expect_equal(comp$n_params, ncol(draws))
+})
+
+test_that("cluster_BPPARAM = FALSE forces sequential cluster compression", {
+  draws <- make_blockwise_draws()
+  cm    <- posterior_correlation(draws)
+  part  <- partition_parameters_clusters(cm, threshold = 0.5, min_size = 2L)
+  comp <- compress_posterior(
+    draws,
+    method          = "mclust",
+    n_components    = 2L,
+    partition       = part,
+    cluster_BPPARAM = FALSE
+  )
+  expect_s3_class(comp, "posterior_compressed_blockwise")
+  expect_equal(comp$n_params, ncol(draws))
+})

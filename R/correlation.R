@@ -129,6 +129,13 @@ posterior_correlation <- function(
 #'   (or any list with `cluster_id` and optionally `hclust`). When
 #'   provided, the heatmap is reordered to keep clusters contiguous and
 #'   each kept cluster is marked with a coloured outline and label.
+#' @param show_cluster_labels Logical or `NULL` (default). If `NULL`, on-plot
+#'   cluster **text** is omitted when there are many clusters or the heatmap
+#'   is dense (few parameters per block); outlines are always drawn. Use
+#'   `TRUE` / `FALSE` to override.
+#' @param show_cluster_legend Logical or `NULL` (default). If `NULL`, the
+#'   cluster **colour legend** follows similar heuristics (slightly more
+#'   permissive than labels). Use `TRUE` / `FALSE` to override.
 #' @param ... Currently unused.
 #'
 #' @return A named list of `ggplot` objects (one entry per `which`).
@@ -144,6 +151,8 @@ plot_posterior_correlation <- function(
     max_params_heatmap = 200L,
     dendrogram = c("none", "both", "row", "column"),
     partition = NULL,
+    show_cluster_labels = NULL,
+    show_cluster_legend = NULL,
     ...) {
   if (!requireNamespace("ggplot2", quietly = TRUE)) {
     stop(
@@ -174,11 +183,13 @@ plot_posterior_correlation <- function(
   if ("heatmap" %in% which) {
     plots$heatmap <- .plot_corr_heatmap(
       x,
-      type               = type,
-      max_params_heatmap = max_params_heatmap,
-      abs_offdiag        = abs_offdiag,
-      dendrogram         = dendrogram,
-      partition          = partition
+      type                 = type,
+      max_params_heatmap   = max_params_heatmap,
+      abs_offdiag          = abs_offdiag,
+      dendrogram           = dendrogram,
+      partition            = partition,
+      show_cluster_labels  = show_cluster_labels,
+      show_cluster_legend  = show_cluster_legend
     )
   }
 
@@ -355,9 +366,20 @@ partition_parameters <- function(
 #'   block. Either a **positive integer** (count), or a **numeric proportion
 #'   strictly between 0 and 1**, in which case it is converted with
 #'   `ceiling(min_size * n_parameters)` and an informative message is printed.
+#'   For count-style inputs, negative values are converted to their absolute
+#'   value and non-integer values are rounded up with `ceiling()`, both with
+#'   warnings. The effective minimum is then clamped to at least `2`; if
+#'   conversion or direct input yields `< 2`, it is reset to `2` with a warning.
 #'   Default `10` (integer count).
 #' @param linkage Linkage method for [stats::hclust()]. Default
 #'   `"average"` (matches what the heatmap uses to reorder).
+#' @param force_remainder Optional; parameters forced into **`remainder`**
+#'   (never assigned to **`blocks`**), regardless of clustering. `NULL`
+#'   (default) keeps the partition as cut from the tree. Otherwise supply
+#'   a tidy-select expression (interpreted like [dplyr::select()] column
+#'   semantics), e.g. `tidyselect::starts_with("cor_")`,
+#'   `tidyselect::contains("gamma")`, or a `c()` / character vector of names.
+#'   Names must appear in `rownames(x)`.
 #'
 #' @return A list of class `"poco_partition_clusters"` with components:
 #'   \describe{
@@ -371,11 +393,12 @@ partition_parameters <- function(
 #'       for reordering (re-used by [plot_posterior_correlation()]);}
 #'     \item{`params`}{the rule's parameters (`threshold`, `k`, `min_size`
 #'       effective count, optional `min_size_proportion` if a proportion was
-#'       given, `linkage`).}
+#'       given, `linkage`, optional `force_remainder` if any names were forced).}
 #'   }
 #'
 #' @seealso [posterior_correlation()], [partition_parameters()],
 #'   [plot_posterior_correlation()].
+#' @importFrom tidyselect eval_select
 #' @export
 #' @examples
 #' set.seed(3)
@@ -390,12 +413,18 @@ partition_parameters <- function(
 #' partition_parameters_clusters(cm, threshold = 0.5, min_size = 2L)
 #' # Proportion in (0, 1): minimum size = ceiling(0.25 * ncol(cm))
 #' partition_parameters_clusters(cm, threshold = 0.5, min_size = 0.25)
+#' # Keep cor_* / residual correlations in the cheap remainder block:
+#' partition_parameters_clusters(cm, threshold = 0.5, min_size = 2L,
+#'   force_remainder = tidyselect::starts_with("cor_"))
+#' partition_parameters_clusters(cm, threshold = 0.5, min_size = 2L,
+#'   force_remainder = c("a1", "a2"))
 partition_parameters_clusters <- function(
     x,
     threshold = NULL,
     k         = NULL,
     min_size  = 10L,
-    linkage   = "average") {
+    linkage   = "average",
+    force_remainder = NULL) {
   if (!is.matrix(x) || !is.numeric(x) || nrow(x) != ncol(x)) {
     stop("`x` must be a square numeric matrix.", call. = FALSE)
   }
@@ -425,14 +454,40 @@ partition_parameters_clusters <- function(
       min_size, " = ceiling(", min_size_prop, " * ", n_params, ")."
     )
   } else {
-    min_size <- suppressWarnings(as.integer(min_size_in))
-    if (length(min_size) != 1L || is.na(min_size) || min_size < 1L) {
+    min_size_num <- suppressWarnings(as.numeric(min_size_in))
+    if (length(min_size_num) != 1L || is.na(min_size_num) ||
+        !is.finite(min_size_num)) {
       stop(
-        "`min_size` must be a positive integer (minimum cluster size) or a ",
-        "proportion in (0, 1) (converted to ceiling(proportion * n_parameters)).",
+        "`min_size` must be numeric: either a count-like value or a ",
+        "proportion in (0, 1).",
         call. = FALSE
       )
     }
+    if (min_size_num < 0) {
+      warning(
+        "`min_size` is negative (", min_size_num,
+        "); using absolute value ", abs(min_size_num), ".",
+        call. = FALSE
+      )
+      min_size_num <- abs(min_size_num)
+    }
+    min_size_num_up <- ceiling(min_size_num)
+    if (!isTRUE(all.equal(min_size_num, min_size_num_up))) {
+      warning(
+        "`min_size` should be an integer count; using ceiling(",
+        min_size_num, ") = ", min_size_num_up, ".",
+        call. = FALSE
+      )
+    }
+    min_size <- as.integer(min_size_num_up)
+  }
+  if (min_size < 2L) {
+    warning(
+      "`min_size` resolved to ", min_size,
+      ", but the minimum allowed effective cluster size is 2; using 2.",
+      call. = FALSE
+    )
+    min_size <- 2L
   }
 
   d  <- stats::as.dist(1 - abs(x))
@@ -473,6 +528,41 @@ partition_parameters_clusters <- function(
     remainder <- names(raw_id)[is.na(new_id)]
   }
 
+  force_remainder_applied <- NULL
+  force_quo <- rlang::enquo(force_remainder)
+  if (!rlang::quo_is_null(force_quo)) {
+    sel_df <- as.data.frame(
+      matrix(
+        ncol = n_params,
+        nrow = 0L,
+        dimnames = list(NULL, rownames(x))
+      ),
+      check.names = FALSE
+    )
+    forced_pos <- tidyselect::eval_select(
+      force_quo,
+      data = sel_df,
+      allow_rename = FALSE
+    )
+    forced_names <- names(forced_pos)
+    if (length(forced_names) > 0L) {
+      blocks <- lapply(blocks, function(b) setdiff(b, forced_names))
+      blocks <- blocks[lengths(blocks) > 0L]
+      if (length(blocks)) {
+        names(blocks) <- paste0("cluster_", seq_along(blocks))
+      }
+      new_id <- rep(NA_integer_, n_params)
+      names(new_id) <- rownames(x)
+      if (length(blocks)) {
+        for (i in seq_along(blocks)) {
+          new_id[blocks[[i]]] <- as.integer(i)
+        }
+      }
+      remainder <- names(new_id)[is.na(new_id)]
+      force_remainder_applied <- forced_names
+    }
+  }
+
   params <- list(
     threshold = threshold,
     k         = k,
@@ -481,6 +571,9 @@ partition_parameters_clusters <- function(
   )
   if (!is.null(min_size_prop)) {
     params$min_size_proportion <- min_size_prop
+  }
+  if (!is.null(force_remainder_applied)) {
+    params$force_remainder <- force_remainder_applied
   }
 
   out <- list(
@@ -619,11 +712,64 @@ print.poco_partition <- function(x, ...) {
 }
 
 
+#' Heuristics for cluster text labels vs colour legend on correlation heatmaps.
+#'
+#' @keywords internal
+#' @noRd
+.auto_cluster_heatmap_annotation <- function(n_blocks, n_params) {
+  if (n_blocks < 1L) {
+    return(list(
+      show_cluster_labels = FALSE,
+      show_cluster_legend = FALSE
+    ))
+  }
+  avg_block <- n_params / n_blocks
+  show_labels <-
+    n_blocks <= 6L && n_params <= 350L && avg_block >= 5
+  show_legend <- n_blocks <= 12L && n_params <= 400L
+  if (n_blocks > 10L) {
+    show_legend <- FALSE
+  }
+  list(
+    show_cluster_labels = show_labels,
+    show_cluster_legend = show_legend
+  )
+}
+
+
+#' One row per distinct **displayed** cluster name: keeps the contiguous run
+#' with largest tile area. Using the label string avoids duplicate on-plot text
+#' when `cluster_id` mixes types (e.g. integer vs character) or other edge
+#' cases that still map to the same `cluster_k` name.
+#'
+#' @keywords internal
+#' @noRd
+.pick_cluster_label_row_per_id <- function(rect_df) {
+  if (!nrow(rect_df)) {
+    return(rect_df)
+  }
+  area <- (rect_df$xmax - rect_df$xmin) * (rect_df$ymax - rect_df$ymin)
+  key <- if ("cluster_lab" %in% names(rect_df)) {
+    as.character(rect_df$cluster_lab)
+  } else {
+    as.character(rect_df$cluster_id)
+  }
+  uid <- unique(key)
+  pick <- vapply(uid, function(nm) {
+    idx <- which(key == nm)
+    idx[which.max(area[idx])]
+  }, integer(1L))
+  rect_df[sort(unname(pick)), , drop = FALSE]
+}
+
+
 #' @keywords internal
 #' @noRd
 .plot_corr_heatmap <- function(x, type, max_params_heatmap, abs_offdiag,
                                dendrogram = "both",
-                               partition  = NULL) {
+                               partition  = NULL,
+                               show_cluster_labels = NULL,
+                               show_cluster_legend = NULL) {
   full_n <- ncol(x)
   if (ncol(x) > max_params_heatmap) {
     keep <- names(sort(abs_offdiag, decreasing = TRUE))[seq_len(max_params_heatmap)]
@@ -690,6 +836,14 @@ print.poco_partition <- function(x, ...) {
     visible <- colnames(x)
     cid <- partition$cluster_id[visible]
     runs <- .contiguous_runs(cid)
+    n_blocks <- length(partition$blocks)
+    auto_ann <- .auto_cluster_heatmap_annotation(n_blocks, length(visible))
+    if (is.null(show_cluster_labels)) {
+      show_cluster_labels <- auto_ann$show_cluster_labels
+    }
+    if (is.null(show_cluster_legend)) {
+      show_cluster_legend <- auto_ann$show_cluster_legend
+    }
     if (nrow(runs) > 0L) {
       block_names <- names(partition$blocks)
       pal <- .cluster_outline_palette(block_names)
@@ -703,6 +857,7 @@ print.poco_partition <- function(x, ...) {
         xmax        = runs$end   + 0.5,
         ymin        = runs$start - 0.5,
         ymax        = runs$end   + 0.5,
+        cluster_id  = as.integer(runs$cluster),
         cluster_lab = lab,
         stringsAsFactors = FALSE
       )
@@ -712,9 +867,28 @@ print.poco_partition <- function(x, ...) {
       ] <- "#333333"
       rect_df$x_text <- (rect_df$xmin + rect_df$xmax) / 2
       rect_df$y_text <- (rect_df$ymin + rect_df$ymax) / 2
+
+      label_df <- .pick_cluster_label_row_per_id(rect_df)
+
       rect_df$cluster_lab <- factor(
         rect_df$cluster_lab,
         levels = names(pal)
+      )
+      label_df$cluster_lab <- factor(
+        as.character(label_df$cluster_lab),
+        levels = names(pal)
+      )
+
+      colour_scale <- ggplot2::scale_colour_manual(
+        name     = "Cluster",
+        values   = pal,
+        drop     = FALSE,
+        na.value = "#333333",
+        guide    = if (isTRUE(show_cluster_legend)) {
+          ggplot2::guide_legend(order = 1)
+        } else {
+          "none"
+        }
       )
 
       p <- p +
@@ -726,33 +900,33 @@ print.poco_partition <- function(x, ...) {
             colour = .data$cluster_lab
           ),
           inherit.aes = FALSE,
-          fill     = NA,
-          linewidth = 1.35
+          fill        = NA,
+          linewidth   = 1.35,
+          show.legend = isTRUE(show_cluster_legend)
         ) +
-        ggplot2::geom_label(
-          data = rect_df,
-          ggplot2::aes(
-            x      = .data$x_text,
-            y      = .data$y_text,
-            label  = .data$cluster_lab,
-            colour = .data$cluster_lab
-          ),
-          inherit.aes = FALSE,
-          fill        = ggplot2::alpha("white", 0.92),
-          label.size  = 0.45,
-          size        = 3.2,
-          fontface    = "bold"
-        ) +
-        ggplot2::scale_colour_manual(
-          name     = "Cluster",
-          values   = pal,
-          drop     = FALSE,
-          na.value = "#333333"
-        )
+        colour_scale
+
+      if (isTRUE(show_cluster_labels)) {
+        p <- p +
+          ggplot2::geom_label(
+            data = label_df,
+            ggplot2::aes(
+              x      = .data$x_text,
+              y      = .data$y_text,
+              label  = .data$cluster_lab,
+              colour = .data$cluster_lab
+            ),
+            inherit.aes = FALSE,
+            fill         = ggplot2::alpha("white", 0.92),
+            label.size   = 0.45,
+            size         = 3.2,
+            fontface     = "bold",
+            show.legend  = FALSE
+          )
+      }
     }
-    n_blocks <- length(unique(stats::na.omit(cid)))
     n_rem <- length(.partition_remainder(partition))
-    if (n_blocks > 0L) {
+    if (length(stats::na.omit(as.integer(cid))) > 0L) {
       p <- p +
         ggplot2::labs(
           subtitle = paste0(
