@@ -41,7 +41,8 @@
 #' }
 #'
 #' @param comp A `posterior_compressed` object (or a path to an `.rds`
-#'   file containing one).
+#'   file containing one), or the return value of [compress_brmsfit()] /
+#'   [compress_sccomp()] (`compressed_fit`: `$compressed` is used).
 #' @param reference_draws A draws matrix, data.frame, or
 #'   `posterior::draws_*` object whose columns include all parameters
 #'   in `comp`. Treated as the ground-truth distribution.
@@ -102,7 +103,8 @@ evaluate_compression <- function(
   comp <- .resolve_compressed(comp)
   if (!inherits(comp, "posterior_compressed")) {
     stop(
-      "`comp` must be a posterior_compressed object (or a path to one).",
+      "`comp` must be a posterior_compressed object, a path to one, ",
+      "or a compressed_fit from compress_brmsfit() / compress_sccomp().",
       call. = FALSE
     )
   }
@@ -341,16 +343,22 @@ print.compression_fidelity <- function(x, ...) {
 #' @noRd
 .classifier_predict <- function(classifier, x_train, y_train, x_test) {
   if (classifier == "ranger") {
-    df <- as.data.frame(x_train)
-    df$.label <- factor(y_train, levels = c(0L, 1L))
+    # Formula interface rejects many brms/Stan parameter names (e.g. brackets).
+    xx_train <- as.matrix(x_train)
+    xx_test <- as.matrix(x_test)
+    p <- ncol(xx_train)
+    safe <- sprintf("v%04d", seq_len(p))
+    colnames(xx_train) <- safe
+    colnames(xx_test) <- safe
+    y_fac <- factor(y_train, levels = c(0L, 1L))
     mod <- ranger::ranger(
-      .label ~ .,
-      data        = df,
+      x           = xx_train,
+      y           = y_fac,
       probability = TRUE,
       num.trees   = 200L,
       verbose     = FALSE
     )
-    df_test <- as.data.frame(x_test)
+    df_test <- as.data.frame(xx_test)
     pr <- predict(mod, df_test)$predictions
     cn <- colnames(pr)
     pr[, if ("1" %in% cn) "1" else cn[length(cn)]]

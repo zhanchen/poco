@@ -94,6 +94,10 @@ density_posterior <- function(object, x, log = FALSE, ...) {
   if (is.character(object) && length(object) == 1L && file.exists(object)) {
     object <- readRDS(object)
   }
+  if (inherits(object, "compressed_fit") && is.list(object) &&
+      !is.null(object$compressed)) {
+    object <- object$compressed
+  }
   object
 }
 

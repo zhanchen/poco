@@ -1,3 +1,21 @@
+test_that("evaluate_compression accepts compressed_fit wrapper (compress_brmsfit-style)", {
+  draws <- make_two_blob_draws()
+  comp <- compress_posterior(draws, method = "mclust", n_components = 2)
+  wrapped <- structure(
+    list(compressed = comp, structure = list(shell = TRUE)),
+    class = c("compressed_brmsfit", "compressed_fit", "list")
+  )
+  fid <- evaluate_compression(
+    wrapped,
+    reference_draws = draws,
+    seed            = 1L,
+    n_self_reps     = 5L,
+    max_n           = 600L
+  )
+  expect_s3_class(fid, "compression_fidelity")
+  expect_equal(fid$n_params, 2L)
+})
+
 test_that("evaluate_compression returns a compression_fidelity object", {
   draws <- make_two_blob_draws()
   comp <- compress_posterior(draws, method = "mclust", n_components = 2)
@@ -152,6 +170,20 @@ test_that("default C2ST classifier is ranger", {
   draws <- make_two_blob_draws()
   comp <- compress_posterior(draws, method = "mclust", n_components = 2)
 
+  fid <- evaluate_compression(
+    comp, draws,
+    metric = "c2st",
+    seed = 1L, max_n = 400L
+  )
+  expect_equal(fid$metrics$c2st$classifier, "ranger")
+  expect_true(is.finite(fid$metrics$c2st$auc))
+})
+
+test_that("C2ST ranger works with brms-like non-formula-safe colnames", {
+  draws <- make_two_blob_draws()
+  colnames(draws) <- c("b[1]", "cor__(1,2):(Intercept__foo)")
+
+  comp <- compress_posterior(draws, method = "mclust", n_components = 2)
   fid <- evaluate_compression(
     comp, draws,
     metric = "c2st",

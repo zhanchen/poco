@@ -346,7 +346,38 @@ cat("\nCompressed size (with xz):", format(compressed_size, big.mark = ","), "by
 cat("That's", round(compressed_size / 1024, 2), "KB\n")
 ```
 
-# Step 4: Regenerate Posterior Samples
+# Evaluating compression fidelity
+```{r}
+plot_overlay <- function(reference, recon, title) {
+  ref_df   <- data.frame(reference, source = "reference")
+  recon_df <- data.frame(recon,     source = "reconstructed")
+  df <- rbind(ref_df, recon_df)
+  cols <- colnames(reference)
+  ggplot(df, aes(x = .data[[cols[1]]], y = .data[[cols[2]]],
+                 colour = source)) +
+    geom_point(alpha = 0.3, size = 0.6) +
+    stat_ellipse(
+      aes(group = source),
+      type = "norm",
+      level = 0.68,
+      linewidth = 0.7,
+      linetype = 2
+    ) +
+    scale_colour_manual(values = c(reference = "gray40",
+                                   reconstructed = "firebrick")) +
+    labs(title = title, x = cols[1], y = cols[2]) +
+    theme_bw() +
+    theme(legend.position = "bottom")
+}
+```
+
+
+```{r}
+fid_full <- evaluate_compression(fit_brms_compressed, original_draws, seed = 1L)
+```
+
+
+# Regenerate Posterior Samples
 
 Sample from the compressed posterior distribution.
 

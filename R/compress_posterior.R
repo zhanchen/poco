@@ -557,6 +557,20 @@ print.compressed_fit <- function(x, ...) {
 }
 
 
+#' @describeIn print.compressed_fit S3 method for [compress_brmsfit()] results.
+#' @export
+print.compressed_brmsfit <- function(x, ...) {
+  print.compressed_fit(x, ...)
+}
+
+
+#' @describeIn print.compressed_fit S3 method for [compress_sccomp()] results.
+#' @export
+print.compressed_sccomp <- function(x, ...) {
+  print.compressed_fit(x, ...)
+}
+
+
 #' @keywords internal
 #' @noRd
 .report_compression <- function(comp, original_size) {

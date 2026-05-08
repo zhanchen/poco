@@ -1,3 +1,26 @@
+test_that("print compressed_brmsfit dispatches safe printer (regression)", {
+  comp <- structure(
+    list(
+      method      = "mclust",
+      n_params    = 1L,
+      n_components = 1L,
+      n_draws     = 1L,
+      param_names = "x"
+    ),
+    class = c("posterior_compressed_mclust", "posterior_compressed", "list")
+  )
+  st <- structure(
+    list(fit = NULL),
+    class = c("brmsfit_stripped", "brmsfit", "list")
+  )
+  res <- structure(
+    list(compressed = comp, structure = st),
+    class = c("compressed_brmsfit", "compressed_fit", "list")
+  )
+  expect_no_error(out <- capture.output(print(res)))
+  expect_true(any(grepl("compressed", out, fixed = TRUE)))
+})
+
 test_that("compress_brmsfit input validation", {
   expect_error(compress_brmsfit("not a brmsfit"), "brmsfit")
   expect_error(compress_brmsfit(NULL), "brmsfit")
@@ -51,6 +74,7 @@ test_that("compress_brmsfit + reconstruct_brmsfit (integration)", {
   # 'sampler_params')) : second argument must be a list").
   expect_s3_class(res$structure, "brmsfit_stripped")
   expect_no_error(capture.output(print(res$structure)))
+  expect_no_error(capture.output(print(res)))
 
   recon <- reconstruct_brmsfit(res, n_draws = 400)
   expect_s3_class(recon, "brmsfit")
