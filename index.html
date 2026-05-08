@@ -33,7 +33,7 @@
       </button>
       <span class="navbar-brand">
         <a class="navbar-link" href="index.html">poco</a>
-        <span class="version label label-default" data-toggle="tooltip" data-placement="bottom" title="">0.1.0</span>
+        <span class="version label label-default" data-toggle="tooltip" data-placement="bottom" title="">0.2.0</span>
       </span>
     </div>
 
@@ -42,13 +42,34 @@
 <li>
   <a href="reference/index.html">Reference</a>
 </li>
+<li class="dropdown">
+  <a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+    Articles
+
+    <span class="caret"></span>
+  </a>
+  <ul class="dropdown-menu" role="menu">
 <li>
-  <a href="articles/index.html">Articles</a>
+      <a href="articles/introduction.html">Introduction</a>
+    </li>
+    <li>
+      <a href="articles/methods-benchmark.html">Methods benchmark</a>
+    </li>
+    <li>
+      <a href="articles/evaluate-compression.html">Evaluate compression</a>
+    </li>
+    <li>
+      <a href="articles/compress-funnel.html">Compress funnel</a>
+    </li>
+    <li>
+      <a href="articles/compress-brms.html">Compress brms</a>
+    </li>
+  </ul>
 </li>
       </ul>
 <ul class="nav navbar-nav navbar-right">
 <li>
-  <a href="https://github.com/MangiolaLaboratory/poco/" class="external-link">
+  <a href="https://github.com/stemangiola/poco/" class="external-link">
     <span class="fab fa-github fa-lg"></span>
 
   </a>
@@ -71,7 +92,7 @@
 <!-- badges: start -->
 
 <p align="left">
-<img src="inst/poco_logo.png" alt="poco logo" style="width: 200px; border-radius: 12px; border: 1px solid rgba(159, 122, 234, 0.35);"></p>
+<img src="https://raw.githubusercontent.com/stemangiola/poco/main/inst/poco_logo.png" alt="poco logo" style="width: 200px; border-radius: 12px; border: 1px solid rgba(159, 122, 234, 0.35);"></p>
 <hr>
 <p><code>poco</code> (POsterior COmpression, “little” in Italian) provides a small, unified API for compressing MCMC posterior draws into compact density approximations (Gaussian mixture models, kernel density estimates), regenerating samples on demand, and evaluating the density at arbitrary points.</p>
 <p>It is designed for situations where you need to store, ship, or post-process <em>many</em> Bayesian models with limited disk space - for example when caching hundreds of <code>brms</code> or <code>sccomp</code> fits, or sharing pre-trained posteriors with collaborators. With Gaussian-mixture compression, the on-disk footprint can drop by 100-1000x while preserving correlation structure, multimodality and most downstream summaries.</p>
@@ -86,7 +107,7 @@
 </h2>
 <div class="sourceCode" id="cb1"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="co"># install.packages("remotes")</span></span>
-<span><span class="fu">remotes</span><span class="fu">::</span><span class="fu"><a href="https://remotes.r-lib.org/reference/install_github.html" class="external-link">install_github</a></span><span class="op">(</span><span class="st">"MangiolaLaboratory/poco"</span><span class="op">)</span></span></code></pre></div>
+<span><span class="fu">remotes</span><span class="fu">::</span><span class="fu"><a href="https://remotes.r-lib.org/reference/install_github.html" class="external-link">install_github</a></span><span class="op">(</span><span class="st">"stemangiola/poco"</span><span class="op">)</span></span></code></pre></div>
 <p><code>brms</code> / <code>cmdstanr</code> / <code>sccomp</code> are <em>Suggested</em> dependencies; you only need them if you plan to compress fits from those packages.</p>
 </div>
 <div class="section level2">
@@ -129,13 +150,15 @@
 <li>
 <code><a href="reference/density_posterior.html">density_posterior()</a></code> - evaluate p.d.f. (or log p.d.f.) at given points,</li>
 <li>
+<code><a href="reference/evaluate_compression.html">evaluate_compression()</a></code> - quantify how much information was lost (a “98.3% reproduction”-style score, see below),</li>
+<li>
 <code><a href="reference/reconstruct_brmsfit.html">reconstruct_brmsfit()</a></code> / <code><a href="reference/reconstruct_sccomp.html">reconstruct_sccomp()</a></code> - rebuild a usable fit object so the standard post-processing keeps working.</li>
 </ul>
 <div class="section level3">
 <h3 id="from-a-draws-matrix">From a draws matrix<a class="anchor" aria-label="anchor" href="#from-a-draws-matrix"></a>
 </h3>
 <div class="sourceCode" id="cb2"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://github.com/MangiolaLaboratory/poco" class="external-link">poco</a></span><span class="op">)</span></span>
+<code class="sourceCode R"><span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://github.com/stemangiola/poco" class="external-link">poco</a></span><span class="op">)</span></span>
 <span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/Random.html" class="external-link">set.seed</a></span><span class="op">(</span><span class="fl">1</span><span class="op">)</span></span>
 <span><span class="va">draws</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/matrix.html" class="external-link">matrix</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/stats/Normal.html" class="external-link">rnorm</a></span><span class="op">(</span><span class="fl">2000</span> <span class="op">*</span> <span class="fl">3</span><span class="op">)</span>, ncol <span class="op">=</span> <span class="fl">3</span>,</span>
@@ -220,6 +243,37 @@
 <p><code><a href="reference/compression_methods.html">compression_methods()</a></code> returns the current set.</p>
 </div>
 <div class="section level2">
+<h2 id="how-much-information-was-lost">How much information was lost?<a class="anchor" aria-label="anchor" href="#how-much-information-was-lost"></a>
+</h2>
+<p>Like JPEG quality scores, <code><a href="reference/evaluate_compression.html">evaluate_compression()</a></code> reports a <code>reproduction %</code> for the compressed posterior. It uses two <em>backend-independent</em> two-sample diagnostics on samples regenerated from the compressed object versus the reference draws — so the score is not circular (it doesn’t reuse the same density model that did the compression):</p>
+<ul>
+<li>
+<strong>Energy distance</strong> (Szekely &amp; Rizzo) anchored against a bootstrap Monte Carlo noise envelope from the reference itself.</li>
+<li>
+<strong>Classifier two-sample test (C2ST)</strong> — a random forest via <code><a href="http://imbs-hl.github.io/ranger/reference/ranger.html" class="external-link">ranger::ranger()</a></code> under cross-validation tries to tell reference draws from reconstructed draws; AUC of 0.5 means indistinguishable. Pass <code>classifier = "knn"</code> for a k-NN alternative instead of the forest.</li>
+</ul>
+<div class="sourceCode" id="cb5"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">fidelity</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/evaluate_compression.html">evaluate_compression</a></span><span class="op">(</span><span class="va">comp</span>, reference_draws <span class="op">=</span> <span class="va">draws</span><span class="op">)</span></span>
+<span><span class="va">fidelity</span></span>
+<span><span class="co">#&gt; &lt;compression_fidelity&gt;</span></span>
+<span><span class="co">#&gt;   method        : mclust</span></span>
+<span><span class="co">#&gt;   parameters    : 3</span></span>
+<span><span class="co">#&gt;   reference n   : 1500</span></span>
+<span><span class="co">#&gt;   eval n        : 1500</span></span>
+<span><span class="co">#&gt;   ----------------------------------------</span></span>
+<span><span class="co">#&gt;   energy        : 100.0% reproduction</span></span>
+<span><span class="co">#&gt;     distance    : 0.054   noise envelope (q90): 0.062   ratio: 0.87x</span></span>
+<span><span class="co">#&gt;   C2ST          :  97.7% reproduction</span></span>
+<span><span class="co">#&gt;     AUC         : 0.511   classifier: ranger   cv_folds: 5</span></span>
+<span><span class="co">#&gt;   ----------------------------------------</span></span>
+<span><span class="co">#&gt;   reproduction  : 98.9%</span></span></code></pre></div>
+<p>For a strict out-of-sample evaluation, hold the reference draws out <em>before</em> fitting:</p>
+<div class="sourceCode" id="cb6"><pre class="downlit sourceCode r">
+<code class="sourceCode R"><span><span class="va">idx</span>  <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/sample.html" class="external-link">sample.int</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/nrow.html" class="external-link">nrow</a></span><span class="op">(</span><span class="va">draws</span><span class="op">)</span>, <span class="fl">0.8</span> <span class="op">*</span> <span class="fu"><a href="https://rdrr.io/r/base/nrow.html" class="external-link">nrow</a></span><span class="op">(</span><span class="va">draws</span><span class="op">)</span><span class="op">)</span></span>
+<span><span class="va">comp</span> <span class="op">&lt;-</span> <span class="fu"><a href="reference/compress_posterior.html">compress_posterior</a></span><span class="op">(</span><span class="va">draws</span><span class="op">[</span><span class="va">idx</span>, <span class="op">]</span>, method <span class="op">=</span> <span class="st">"mclust"</span><span class="op">)</span></span>
+<span><span class="fu"><a href="reference/evaluate_compression.html">evaluate_compression</a></span><span class="op">(</span><span class="va">comp</span>, reference_draws <span class="op">=</span> <span class="va">draws</span><span class="op">[</span><span class="op">-</span><span class="va">idx</span>, <span class="op">]</span><span class="op">)</span></span></code></pre></div>
+</div>
+<div class="section level2">
 <h2 id="vignettes">Vignettes<a class="anchor" aria-label="anchor" href="#vignettes"></a>
 </h2>
 <ul>
@@ -233,6 +287,8 @@
 <code>vignette("compress-sccomp", package = "poco")</code> - end-to-end <code>sccomp</code> workflow.</li>
 <li>
 <code><a href="articles/methods-benchmark.html">vignette("methods-benchmark", package = "poco")</a></code> - side-by-side comparison of the supported compression methods.</li>
+<li>
+<code><a href="articles/evaluate-compression.html">vignette("evaluate-compression", package = "poco")</a></code> - measure reproduction quality with <code><a href="reference/evaluate_compression.html">evaluate_compression()</a></code> (sanity checks on lost correlation, mode collapse, and a sliding-difficulty sweep).</li>
 </ul>
 </div>
 <div class="section level2">
@@ -247,8 +303,8 @@
     <div class="links">
 <h2 data-toc-skip>Links</h2>
 <ul class="list-unstyled">
-<li><a href="https://github.com/MangiolaLaboratory/poco/" class="external-link">Browse source code</a></li>
-<li><a href="https://github.com/MangiolaLaboratory/poco/issues" class="external-link">Report a bug</a></li>
+<li><a href="https://github.com/stemangiola/poco/" class="external-link">Browse source code</a></li>
+<li><a href="https://github.com/stemangiola/poco/issues" class="external-link">Report a bug</a></li>
 </ul>
 </div>
 

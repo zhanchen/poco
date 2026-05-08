@@ -17,7 +17,7 @@
       </button>
       <span class="navbar-brand">
         <a class="navbar-link" href="../index.html">poco</a>
-        <span class="version label label-default" data-toggle="tooltip" data-placement="bottom" title="">0.1.0</span>
+        <span class="version label label-default" data-toggle="tooltip" data-placement="bottom" title="">0.2.0</span>
       </span>
     </div>
 
@@ -25,11 +25,30 @@
       <ul class="nav navbar-nav"><li>
   <a href="../reference/index.html">Reference</a>
 </li>
-<li>
-  <a href="../articles/index.html">Articles</a>
-</li>
+<li class="dropdown">
+  <a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+    Articles
+
+    <span class="caret"></span>
+  </a>
+  <ul class="dropdown-menu" role="menu"><li>
+      <a href="../articles/introduction.html">Introduction</a>
+    </li>
+    <li>
+      <a href="../articles/methods-benchmark.html">Methods benchmark</a>
+    </li>
+    <li>
+      <a href="../articles/evaluate-compression.html">Evaluate compression</a>
+    </li>
+    <li>
+      <a href="../articles/compress-funnel.html">Compress funnel</a>
+    </li>
+    <li>
+      <a href="../articles/compress-brms.html">Compress brms</a>
+    </li>
+  </ul></li>
       </ul><ul class="nav navbar-nav navbar-right"><li>
-  <a href="https://github.com/MangiolaLaboratory/poco/" class="external-link">
+  <a href="https://github.com/stemangiola/poco/" class="external-link">
     <span class="fab fa-github fa-lg"></span>
 
   </a>
@@ -82,6 +101,10 @@
           <p><code><a href="density_posterior.html">density_posterior()</a></code> </p>
         </td>
         <td><p>Evaluate the density of a compressed posterior</p></td>
+      </tr><tr><td>
+          <p><code><a href="evaluate_compression.html">evaluate_compression()</a></code> <code><a href="evaluate_compression.html">print(<i>&lt;compression_fidelity&gt;</i>)</a></code> </p>
+        </td>
+        <td><p>Evaluate the fidelity of a compressed posterior</p></td>
       </tr><tr><td>
           <p><code><a href="get_n_draws_from_fit.html">get_n_draws_from_fit()</a></code> </p>
         </td>

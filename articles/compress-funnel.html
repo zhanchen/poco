@@ -32,7 +32,7 @@
       </button>
       <span class="navbar-brand">
         <a class="navbar-link" href="../index.html">poco</a>
-        <span class="version label label-default" data-toggle="tooltip" data-placement="bottom" title="">0.1.0</span>
+        <span class="version label label-default" data-toggle="tooltip" data-placement="bottom" title="">0.2.0</span>
       </span>
     </div>
 
@@ -41,13 +41,34 @@
 <li>
   <a href="../reference/index.html">Reference</a>
 </li>
+<li class="dropdown">
+  <a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+    Articles
+
+    <span class="caret"></span>
+  </a>
+  <ul class="dropdown-menu" role="menu">
 <li>
-  <a href="../articles/index.html">Articles</a>
+      <a href="../articles/introduction.html">Introduction</a>
+    </li>
+    <li>
+      <a href="../articles/methods-benchmark.html">Methods benchmark</a>
+    </li>
+    <li>
+      <a href="../articles/evaluate-compression.html">Evaluate compression</a>
+    </li>
+    <li>
+      <a href="../articles/compress-funnel.html">Compress funnel</a>
+    </li>
+    <li>
+      <a href="../articles/compress-brms.html">Compress brms</a>
+    </li>
+  </ul>
 </li>
       </ul>
 <ul class="nav navbar-nav navbar-right">
 <li>
-  <a href="https://github.com/MangiolaLaboratory/poco/" class="external-link">
+  <a href="https://github.com/stemangiola/poco/" class="external-link">
     <span class="fab fa-github fa-lg"></span>
 
   </a>
@@ -68,7 +89,7 @@
       <h1 data-toc-skip>Compressing a cmdstanr funnel posterior</h1>
             
       
-      <small class="dont-index">Source: <a href="https://github.com/MangiolaLaboratory/poco/blob/main/vignettes/compress-funnel.Rmd" class="external-link"><code>vignettes/compress-funnel.Rmd</code></a></small>
+      <small class="dont-index">Source: <a href="https://github.com/stemangiola/poco/blob/main/vignettes/compress-funnel.Rmd" class="external-link"><code>vignettes/compress-funnel.Rmd</code></a></small>
       <div class="hidden name"><code>compress-funnel.Rmd</code></div>
 
     </div>
@@ -88,7 +109,7 @@ vignette still builds on machines that do not have CmdStan installed
 <span><span class="fu">cmdstanr</span><span class="fu">::</span><span class="fu"><a href="https://mc-stan.org/cmdstanr/reference/install_cmdstan.html" class="external-link">check_cmdstan_toolchain</a></span><span class="op">(</span>fix <span class="op">=</span> <span class="cn">TRUE</span><span class="op">)</span></span>
 <span><span class="fu">cmdstanr</span><span class="fu">::</span><span class="fu"><a href="https://mc-stan.org/cmdstanr/reference/install_cmdstan.html" class="external-link">install_cmdstan</a></span><span class="op">(</span><span class="op">)</span></span></code></pre></div>
 <div class="sourceCode" id="cb2"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://github.com/MangiolaLaboratory/poco" class="external-link">poco</a></span><span class="op">)</span></span></code></pre></div>
+<code class="sourceCode R"><span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://github.com/stemangiola/poco" class="external-link">poco</a></span><span class="op">)</span></span></code></pre></div>
 <div class="section level2">
 <h2 id="fit-the-funnel-model">Fit the funnel model<a class="anchor" aria-label="anchor" href="#fit-the-funnel-model"></a>
 </h2>
@@ -164,7 +185,7 @@ vignette still builds on machines that do not have CmdStan installed
 <span><span class="co">#&gt; See https://mc-stan.org/misc/warnings for details.</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> mclust: trying all 14 covariance models c(EII, VII, EEI, VEI, EVI, VVI, EEE, VEE, EVE, VVE, EEV, VEV, EVV, VVV) and picking the best by BIC (n = 4000, d = 7).</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> mclust: selected model 'VVE' with G = 5 (BIC = -99,113.36) out of 14 candidate models: EII, VII, EEI, VEI, EVI, VVI, EEE, VEE, EVE, VVE, EEV, VEV, EVV, VVV.</span></span>
-<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Compression: 512,499 B raw -&gt; ~7,312 B in memory (70x).</span></span>
+<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Compression: 512,504 B raw -&gt; ~7,312 B in memory (70x).</span></span>
 <span><span class="co">#&gt; Warning: 114 of 4000 (3.0%) transitions ended with a divergence.</span></span>
 <span><span class="co">#&gt; See https://mc-stan.org/misc/warnings for details.</span></span>
 <span><span class="co">#&gt; Warning: 1 of 4000 (0.0%) transitions hit the maximum treedepth limit of 10.</span></span>
@@ -173,14 +194,14 @@ vignette still builds on machines that do not have CmdStan installed
 <span><span class="co">#&gt; See https://mc-stan.org/misc/warnings for details.</span></span>
 <span><span class="co">#&gt; Warning in .fit.gmm.internal(x, K, truncated = F, bounds = NA, min_cov = NULL,</span></span>
 <span><span class="co">#&gt; : Could not find initial clustering with k-means++</span></span>
-<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Compression: 512,499 B raw -&gt; ~2,104 B in memory (244x).</span></span>
+<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Compression: 512,504 B raw -&gt; ~2,104 B in memory (244x).</span></span>
 <span><span class="co">#&gt; Warning: 114 of 4000 (3.0%) transitions ended with a divergence.</span></span>
 <span><span class="co">#&gt; See https://mc-stan.org/misc/warnings for details.</span></span>
 <span><span class="co">#&gt; Warning: 1 of 4000 (0.0%) transitions hit the maximum treedepth limit of 10.</span></span>
 <span><span class="co">#&gt; See https://mc-stan.org/misc/warnings for details.</span></span>
 <span><span class="co">#&gt; Warning: 4 of 4 chains had an E-BFMI less than 0.3.</span></span>
 <span><span class="co">#&gt; See https://mc-stan.org/misc/warnings for details.</span></span>
-<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Compression: 512,499 B raw -&gt; ~485,232 B in memory (1x).</span></span>
+<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Compression: 512,504 B raw -&gt; ~485,232 B in memory (1x).</span></span>
 <span><span class="fu"><a href="https://rdrr.io/r/base/names.html" class="external-link">names</a></span><span class="op">(</span><span class="va">comps</span><span class="op">)</span> <span class="op">&lt;-</span> <span class="va">methods</span></span>
 <span></span>
 <span><span class="va">compress_status</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://rdrr.io/r/base/data.frame.html" class="external-link">data.frame</a></span><span class="op">(</span></span>
@@ -215,7 +236,7 @@ vignette still builds on machines that do not have CmdStan installed
 <span><span class="co">#&gt; See https://mc-stan.org/misc/warnings for details.</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> mclust: trying all 14 covariance models c(EII, VII, EEI, VEI, EVI, VVI, EEE, VEE, EVE, VVE, EEV, VEV, EVV, VVV) and picking the best by BIC (n = 4000, d = 7).</span></span>
 <span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> mclust: selected model 'VVE' with G = 5 (BIC = -99,112.97) out of 14 candidate models: EII, VII, EEI, VEI, EVI, VVI, EEE, VEE, EVE, VVE, EEV, VEV, EVV, VVV.</span></span>
-<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Compression: 512,499 B raw -&gt; ~7,312 B in memory (70x).</span></span>
+<span><span class="co">#&gt; <span style="color: #00BBBB;">ℹ</span> Compression: 512,504 B raw -&gt; ~7,312 B in memory (70x).</span></span>
 <span><span class="va">comp_csv</span></span>
 <span><span class="co">#&gt; &lt;posterior_compressed: mclust &gt;</span></span>
 <span><span class="co">#&gt;  parameters: 7</span></span>
@@ -314,7 +335,7 @@ vignette still builds on machines that do not have CmdStan installed
 <span><span class="co">#&gt; [1] stats     graphics  grDevices utils     datasets  methods   base     </span></span>
 <span><span class="co">#&gt; </span></span>
 <span><span class="co">#&gt; other attached packages:</span></span>
-<span><span class="co">#&gt; [1] ggplot2_4.0.3  cmdstanr_0.9.0 poco_0.1.0    </span></span>
+<span><span class="co">#&gt; [1] ggplot2_4.0.3  cmdstanr_0.9.0 poco_0.2.0    </span></span>
 <span><span class="co">#&gt; </span></span>
 <span><span class="co">#&gt; loaded via a namespace (and not attached):</span></span>
 <span><span class="co">#&gt;  [1] tensorA_0.36.2.1     sass_0.4.10          generics_0.1.4      </span></span>

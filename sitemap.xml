@@ -3,6 +3,7 @@
 <url><loc>/LICENSE-text.html</loc></url>
 <url><loc>/articles/compress-brms.html</loc></url>
 <url><loc>/articles/compress-funnel.html</loc></url>
+<url><loc>/articles/evaluate-compression.html</loc></url>
 <url><loc>/articles/index.html</loc></url>
 <url><loc>/articles/introduction.html</loc></url>
 <url><loc>/articles/methods-benchmark.html</loc></url>
@@ -17,6 +18,7 @@
 <url><loc>/reference/compress_sccomp.html</loc></url>
 <url><loc>/reference/compression_methods.html</loc></url>
 <url><loc>/reference/density_posterior.html</loc></url>
+<url><loc>/reference/evaluate_compression.html</loc></url>
 <url><loc>/reference/get_n_draws_from_fit.html</loc></url>
 <url><loc>/reference/has_cmdstan.html</loc></url>
 <url><loc>/reference/index.html</loc></url>

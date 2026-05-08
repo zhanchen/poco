@@ -32,7 +32,7 @@
       </button>
       <span class="navbar-brand">
         <a class="navbar-link" href="../index.html">poco</a>
-        <span class="version label label-default" data-toggle="tooltip" data-placement="bottom" title="">0.1.0</span>
+        <span class="version label label-default" data-toggle="tooltip" data-placement="bottom" title="">0.2.0</span>
       </span>
     </div>
 
@@ -41,13 +41,34 @@
 <li>
   <a href="../reference/index.html">Reference</a>
 </li>
+<li class="dropdown">
+  <a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+    Articles
+
+    <span class="caret"></span>
+  </a>
+  <ul class="dropdown-menu" role="menu">
 <li>
-  <a href="../articles/index.html">Articles</a>
+      <a href="../articles/introduction.html">Introduction</a>
+    </li>
+    <li>
+      <a href="../articles/methods-benchmark.html">Methods benchmark</a>
+    </li>
+    <li>
+      <a href="../articles/evaluate-compression.html">Evaluate compression</a>
+    </li>
+    <li>
+      <a href="../articles/compress-funnel.html">Compress funnel</a>
+    </li>
+    <li>
+      <a href="../articles/compress-brms.html">Compress brms</a>
+    </li>
+  </ul>
 </li>
       </ul>
 <ul class="nav navbar-nav navbar-right">
 <li>
-  <a href="https://github.com/MangiolaLaboratory/poco/" class="external-link">
+  <a href="https://github.com/stemangiola/poco/" class="external-link">
     <span class="fab fa-github fa-lg"></span>
 
   </a>
@@ -68,7 +89,7 @@
       <h1 data-toc-skip>Comparing compression methods</h1>
             
       
-      <small class="dont-index">Source: <a href="https://github.com/MangiolaLaboratory/poco/blob/main/vignettes/methods-benchmark.Rmd" class="external-link"><code>vignettes/methods-benchmark.Rmd</code></a></small>
+      <small class="dont-index">Source: <a href="https://github.com/stemangiola/poco/blob/main/vignettes/methods-benchmark.Rmd" class="external-link"><code>vignettes/methods-benchmark.Rmd</code></a></small>
       <div class="hidden name"><code>methods-benchmark.Rmd</code></div>
 
     </div>
@@ -80,7 +101,7 @@ switch between density approximations. This vignette compares the
 available backends on a small synthetic posterior so you can pick the
 right trade-off for your problem.</p>
 <div class="sourceCode" id="cb1"><pre class="downlit sourceCode r">
-<code class="sourceCode R"><span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://github.com/MangiolaLaboratory/poco" class="external-link">poco</a></span><span class="op">)</span></span>
+<code class="sourceCode R"><span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://github.com/stemangiola/poco" class="external-link">poco</a></span><span class="op">)</span></span>
 <span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="http://mvtnorm.R-forge.R-project.org" class="external-link">mvtnorm</a></span><span class="op">)</span></span></code></pre></div>
 <div class="section level2">
 <h2 id="available-methods">Available methods<a class="anchor" aria-label="anchor" href="#available-methods"></a>
@@ -483,36 +504,36 @@ backend and visualize runtime.</p>
 <span><span class="co">#&gt; Warning in .fit.gmm.internal(x, K, truncated = F, bounds = NA, min_cov = NULL,</span></span>
 <span><span class="co">#&gt; : Solution not converged in1000, returning optimal found solution</span></span>
 <span><span class="co">#&gt;                     expr   time_ms</span></span>
-<span><span class="co">#&gt; mclust_gmm.1  mclust_gmm  2291.539</span></span>
-<span><span class="co">#&gt; mclust_gmm.2  mclust_gmm  3114.661</span></span>
-<span><span class="co">#&gt; mclust_gmm.3  mclust_gmm  2359.751</span></span>
-<span><span class="co">#&gt; mclust_gmm.4  mclust_gmm  2618.914</span></span>
-<span><span class="co">#&gt; mclust_gmm.5  mclust_gmm  2993.773</span></span>
-<span><span class="co">#&gt; mclust_gmm.6  mclust_gmm  2287.872</span></span>
-<span><span class="co">#&gt; mclust_gmm.7  mclust_gmm  2230.859</span></span>
-<span><span class="co">#&gt; mclust_gmm.8  mclust_gmm  2522.010</span></span>
-<span><span class="co">#&gt; mclust_gmm.9  mclust_gmm  2473.457</span></span>
-<span><span class="co">#&gt; mclust_gmm.10 mclust_gmm  2222.200</span></span>
-<span><span class="co">#&gt; mvdens_gmm.1  mvdens_gmm  8817.745</span></span>
-<span><span class="co">#&gt; mvdens_gmm.2  mvdens_gmm  8209.484</span></span>
-<span><span class="co">#&gt; mvdens_gmm.3  mvdens_gmm  9294.985</span></span>
-<span><span class="co">#&gt; mvdens_gmm.4  mvdens_gmm  7181.189</span></span>
-<span><span class="co">#&gt; mvdens_gmm.5  mvdens_gmm 27389.210</span></span>
-<span><span class="co">#&gt; mvdens_gmm.6  mvdens_gmm 27568.766</span></span>
-<span><span class="co">#&gt; mvdens_gmm.7  mvdens_gmm 26956.049</span></span>
-<span><span class="co">#&gt; mvdens_gmm.8  mvdens_gmm  6781.217</span></span>
-<span><span class="co">#&gt; mvdens_gmm.9  mvdens_gmm 27078.216</span></span>
-<span><span class="co">#&gt; mvdens_gmm.10 mvdens_gmm 27227.385</span></span>
-<span><span class="co">#&gt; mvdens_kde.1  mvdens_kde  5233.779</span></span>
-<span><span class="co">#&gt; mvdens_kde.2  mvdens_kde  3962.160</span></span>
-<span><span class="co">#&gt; mvdens_kde.3  mvdens_kde  4119.624</span></span>
-<span><span class="co">#&gt; mvdens_kde.4  mvdens_kde  3999.756</span></span>
-<span><span class="co">#&gt; mvdens_kde.5  mvdens_kde  4227.079</span></span>
-<span><span class="co">#&gt; mvdens_kde.6  mvdens_kde  3952.325</span></span>
-<span><span class="co">#&gt; mvdens_kde.7  mvdens_kde  4010.688</span></span>
-<span><span class="co">#&gt; mvdens_kde.8  mvdens_kde  4204.784</span></span>
-<span><span class="co">#&gt; mvdens_kde.9  mvdens_kde  4356.801</span></span>
-<span><span class="co">#&gt; mvdens_kde.10 mvdens_kde  3898.982</span></span></code></pre></div>
+<span><span class="co">#&gt; mclust_gmm.1  mclust_gmm  2266.323</span></span>
+<span><span class="co">#&gt; mclust_gmm.2  mclust_gmm  3087.275</span></span>
+<span><span class="co">#&gt; mclust_gmm.3  mclust_gmm  2337.956</span></span>
+<span><span class="co">#&gt; mclust_gmm.4  mclust_gmm  2589.105</span></span>
+<span><span class="co">#&gt; mclust_gmm.5  mclust_gmm  2978.034</span></span>
+<span><span class="co">#&gt; mclust_gmm.6  mclust_gmm  2271.915</span></span>
+<span><span class="co">#&gt; mclust_gmm.7  mclust_gmm  2210.626</span></span>
+<span><span class="co">#&gt; mclust_gmm.8  mclust_gmm  2284.476</span></span>
+<span><span class="co">#&gt; mclust_gmm.9  mclust_gmm  2463.671</span></span>
+<span><span class="co">#&gt; mclust_gmm.10 mclust_gmm  2193.171</span></span>
+<span><span class="co">#&gt; mvdens_gmm.1  mvdens_gmm  8740.429</span></span>
+<span><span class="co">#&gt; mvdens_gmm.2  mvdens_gmm  8165.664</span></span>
+<span><span class="co">#&gt; mvdens_gmm.3  mvdens_gmm  9290.780</span></span>
+<span><span class="co">#&gt; mvdens_gmm.4  mvdens_gmm  7157.642</span></span>
+<span><span class="co">#&gt; mvdens_gmm.5  mvdens_gmm 27211.816</span></span>
+<span><span class="co">#&gt; mvdens_gmm.6  mvdens_gmm 27394.787</span></span>
+<span><span class="co">#&gt; mvdens_gmm.7  mvdens_gmm 27421.848</span></span>
+<span><span class="co">#&gt; mvdens_gmm.8  mvdens_gmm  6879.636</span></span>
+<span><span class="co">#&gt; mvdens_gmm.9  mvdens_gmm 27053.909</span></span>
+<span><span class="co">#&gt; mvdens_gmm.10 mvdens_gmm 27254.639</span></span>
+<span><span class="co">#&gt; mvdens_kde.1  mvdens_kde  5246.129</span></span>
+<span><span class="co">#&gt; mvdens_kde.2  mvdens_kde  4481.818</span></span>
+<span><span class="co">#&gt; mvdens_kde.3  mvdens_kde  4556.547</span></span>
+<span><span class="co">#&gt; mvdens_kde.4  mvdens_kde  4530.410</span></span>
+<span><span class="co">#&gt; mvdens_kde.5  mvdens_kde  4227.239</span></span>
+<span><span class="co">#&gt; mvdens_kde.6  mvdens_kde  4489.906</span></span>
+<span><span class="co">#&gt; mvdens_kde.7  mvdens_kde  4761.143</span></span>
+<span><span class="co">#&gt; mvdens_kde.8  mvdens_kde  4213.746</span></span>
+<span><span class="co">#&gt; mvdens_kde.9  mvdens_kde  4723.592</span></span>
+<span><span class="co">#&gt; mvdens_kde.10 mvdens_kde  4075.860</span></span></code></pre></div>
 <p><img src="methods-benchmark_files/figure-html/benchmark-compression-1.png" class="r-plt" alt="" width="768"></p>
 </div>
 <div class="section level2">
@@ -556,7 +577,7 @@ useful when the posterior is far from a mixture of Gaussians.</li>
 <span><span class="co">#&gt; [1] stats     graphics  grDevices utils     datasets  methods   base     </span></span>
 <span><span class="co">#&gt; </span></span>
 <span><span class="co">#&gt; other attached packages:</span></span>
-<span><span class="co">#&gt; [1] mvtnorm_1.3-7 poco_0.1.0   </span></span>
+<span><span class="co">#&gt; [1] mvtnorm_1.3-7 poco_0.2.0   </span></span>
 <span><span class="co">#&gt; </span></span>
 <span><span class="co">#&gt; loaded via a namespace (and not attached):</span></span>
 <span><span class="co">#&gt;  [1] ks_1.15.1            sass_0.4.10          generics_0.1.4      </span></span>
