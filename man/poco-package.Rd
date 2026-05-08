@@ -39,8 +39,8 @@ fed to \code{\link[=sample_posterior]{sample_posterior()}} and \code{\link[=dens
 \seealso{
 Useful links:
 \itemize{
-  \item \url{https://github.com/MangiolaLaboratory/poco}
-  \item Report bugs at \url{https://github.com/MangiolaLaboratory/poco/issues}
+  \item \url{https://github.com/stemangiola/poco}
+  \item Report bugs at \url{https://github.com/stemangiola/poco/issues}
 }
 
 }
