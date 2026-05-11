@@ -31,6 +31,16 @@
 #' the score is not "circular": it does not depend on the same density
 #' model that produced the compression.
 #'
+#' **Blockwise** objects (`method = "blockwise"`): [sample_posterior()]
+#' draws each block independently and re-assembles columns, so the
+#' reconstructed **joint** distribution treats **between-block**
+#' correlations as zero. Reference MCMC draws usually retain those
+#' correlations. Energy distance and C2ST are **joint** tests in
+#' `n_params` dimensions, so scores are often **much lower** than for a
+#' single-block compression on the same data — that is expected, not a
+#' fitting bug. The returned object includes `blockwise` and
+#' `base_method` so you can see which case you are in.
+#'
 #' For a strict out-of-sample evaluation, hold out a fraction of the
 #' draws \emph{before} fitting:
 #'
@@ -68,6 +78,10 @@
 #'     averaged across requested metrics.}
 #'   \item{`metrics`}{Named list with detailed per-metric results.}
 #'   \item{`n_reference`, `n_eval`, `n_params`}{Sample sizes used.}
+#'   \item{`method`}{Compression dispatch label (`"mclust"`, `"blockwise"`, etc.).}
+#'   \item{`base_method`}{For blockwise objects, the per-block backend
+#'     (e.g. `"mclust"`); otherwise same as `method` or `NA_character_`.}
+#'   \item{`blockwise`}{`TRUE` if `comp` was blockwise.}
 #' }
 #'
 #' @references
@@ -159,6 +173,13 @@ evaluate_compression <- function(
   pcts <- vapply(metrics_out, function(m) m$reproduction_pct, numeric(1))
   reproduction_pct <- if (length(pcts) > 0L) mean(pcts) else NA_real_
 
+  is_bw <- inherits(comp, "posterior_compressed_blockwise")
+  base_m <- if (is_bw) {
+    as.character(comp$base_method %||% NA_character_)
+  } else {
+    as.character(comp$method %||% NA_character_)
+  }
+
   out <- list(
     reproduction_pct = reproduction_pct,
     metrics          = metrics_out,
@@ -166,6 +187,8 @@ evaluate_compression <- function(
     n_eval           = nrow(recon_used),
     n_params         = ncol(ref_used),
     method           = comp$method,
+    base_method      = base_m,
+    blockwise        = is_bw,
     param_names      = comp$param_names
   )
   class(out) <- c("compression_fidelity", "list")
@@ -183,6 +206,14 @@ print.compression_fidelity <- function(x, ...) {
     "  method        : %s\n  parameters    : %d\n  reference n   : %d\n  eval n        : %d\n",
     x$method, x$n_params, x$n_reference, x$n_eval
   ))
+  if (isTRUE(x$blockwise)) {
+    cat(sprintf(
+      "  blockwise     : TRUE (joint metrics vs reference — between-block correlations not in reconstruction; scores often lower than single-block compression)\n"
+    ))
+    if (!is.null(x$base_method) && !is.na(x$base_method)) {
+      cat(sprintf("  base_method   : %s\n", x$base_method))
+    }
+  }
   cat("  ----------------------------------------\n")
   if (!is.null(x$metrics$energy)) {
     e <- x$metrics$energy

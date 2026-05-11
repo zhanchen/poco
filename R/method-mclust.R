@@ -86,8 +86,13 @@
   } else {
     means_mat <- matrix(as.numeric(means_raw), nrow = d, ncol = G)
   }
-  # mclust sometimes returns a G x d matrix (e.g. univariate G means as a column).
-  if (nrow(means_mat) == G && ncol(means_mat) == d) {
+  # mclust returns a d x G matrix for multivariate fits and a length-G vector
+  # for univariate fits (handled by the else branch above). Only fall back to
+  # transposing when the shape is strictly G x d and *not* already d x G --
+  # otherwise the d == G case (e.g. d = G = 2) silently swaps components and
+  # parameters in the means.
+  if (!(nrow(means_mat) == d && ncol(means_mat) == G) &&
+      nrow(means_mat) == G && ncol(means_mat) == d) {
     means_mat <- t(means_mat)
   }
   if (nrow(means_mat) != d || ncol(means_mat) != G) {

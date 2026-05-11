@@ -112,6 +112,22 @@ test_that("default S3 methods error helpfully on wrong class", {
   expect_error(density_posterior(list(), matrix(1)), "No density_posterior")
 })
 
+test_that("mclust means stay d x G when d == G (no spurious transpose)", {
+  draws <- make_two_blob_draws()
+  comp <- compress_posterior(draws, method = "mclust", n_components = 2L)
+  expect_equal(dim(comp$means), c(2L, 2L))
+  # Each column of means should be close to one of the two true blob centers
+  # (-2, -1) or (2, 1). If the means were silently transposed, columns would
+  # be (-2, 2) and (-1, 1) instead, which are NOT close to either true center.
+  true_centers <- list(c(-2, -1), c(2, 1))
+  dist_to_truth <- function(mu) {
+    min(vapply(true_centers, function(tc) sqrt(sum((mu - tc)^2)), numeric(1)))
+  }
+  for (k in seq_len(comp$n_components)) {
+    expect_lt(dist_to_truth(comp$means[, k]), 0.3)
+  }
+})
+
 test_that("univariate mclust compression samples without isSymmetric error", {
   set.seed(1L)
   n <- 300L
