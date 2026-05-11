@@ -278,6 +278,66 @@ test_that("plain list of character vectors coerces to blockwise partition", {
   expect_setequal(rem$param_names, c("r1", "r2", "r3", "r4"))
 })
 
+test_that("singleton-parameter manual blocks move to remainder with warning", {
+  draws <- make_blockwise_draws()
+  part <- list(
+    c("g1_a", "g1_b", "g1_c"),
+    c("g2_a"),
+    c("g2_b", "g2_c")
+  )
+  expect_warning(
+    comp <- compress_posterior(
+      draws,
+      method               = "mclust",
+      n_components         = 2L,
+      partition            = part,
+      remainder_model_name = "VVI"
+    ),
+    "only one parameter"
+  )
+  expect_s3_class(comp, "posterior_compressed_blockwise")
+  for (nm in comp$cluster_block_names) {
+    expect_gt(length(comp$blocks[[nm]]$param_names), 1L)
+  }
+  expect_true("g2_a" %in% comp$blocks$remainder$param_names)
+})
+
+test_that("blockwise remainder with a single parameter fits (univariate E/V mclust)", {
+  set.seed(2L)
+  n <- 400L
+  draws <- cbind(
+    matrix(rnorm(n * 2L), ncol = 2L),
+    rnorm(n, mean = 3, sd = 0.5)
+  )
+  colnames(draws) <- c("a", "b", "only_rem")
+  # One cluster; `only_rem` is the sole implicit remainder (e.g. after singleton
+  # cluster demotion, remainder can also be length 1).
+  part <- list(c("a", "b"))
+  expect_no_error(
+    comp <- suppressMessages(
+      compress_posterior(
+        draws,
+        method               = "mclust",
+        n_components         = 2L,
+        partition            = part,
+        remainder_model_name = "VVI"
+      )
+    )
+  )
+  expect_s3_class(comp, "posterior_compressed_blockwise")
+  rem <- comp$blocks$remainder
+  expect_equal(rem$param_names, "only_rem")
+  expect_equal(rem$n_params, 1L)
+  expect_true(rem$model_name %in% c("E", "V"))
+  s <- suppressMessages(sample_posterior(comp, n_draws = 100L))
+  expect_equal(dim(s), c(100L, ncol(draws)))
+  expect_true(all(is.finite(s)))
+  x_eval <- matrix(0, nrow = 1L, ncol = ncol(draws))
+  colnames(x_eval) <- colnames(draws)
+  dtot <- suppressMessages(density_posterior(comp, x_eval))
+  expect_true(is.finite(dtot) && dtot > 0)
+})
+
 test_that("partition_blocks() resolves tidyselect against draws colnames", {
   draws <- make_blockwise_draws()
   pb <- partition_blocks(

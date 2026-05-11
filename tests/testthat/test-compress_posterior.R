@@ -112,6 +112,34 @@ test_that("default S3 methods error helpfully on wrong class", {
   expect_error(density_posterior(list(), matrix(1)), "No density_posterior")
 })
 
+test_that("univariate mclust compression samples without isSymmetric error", {
+  set.seed(1L)
+  n <- 300L
+  draws <- matrix(rnorm(n), ncol = 1L, dimnames = list(NULL, "x"))
+  comp <- compress_posterior(draws, method = "mclust", n_components = 2L)
+  expect_equal(comp$covariance_type, "diagonal")
+  expect_equal(dim(comp$covariances), c(1L, comp$n_components))
+  s <- sample_posterior(comp, n_draws = 100L)
+  expect_equal(dim(s), c(100L, 1L))
+  expect_true(all(is.finite(s)))
+  d <- density_posterior(comp, matrix(c(0, 0.5, -1), ncol = 1L))
+  expect_true(all(is.finite(d)) && all(d >= 0))
+})
+
+test_that("univariate mclust infers diagonal layout if covariance_type was stripped", {
+  set.seed(3L)
+  comp <- compress_posterior(
+    matrix(rnorm(250L), ncol = 1L, dimnames = list(NULL, "x")),
+    method = "mclust",
+    n_components = 2L
+  )
+  comp$covariance_type <- NULL
+  expect_no_error(s <- sample_posterior(comp, n_draws = 40L))
+  expect_equal(ncol(s), 1L)
+  expect_true(all(is.finite(s)))
+  expect_no_error(density_posterior(comp, matrix(0.1, nrow = 1L, ncol = 1L)))
+})
+
 test_that("axis-aligned mclust models are stored as diagonal covariances", {
   draws <- make_two_blob_draws()
   comp <- compress_posterior(

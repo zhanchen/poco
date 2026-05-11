@@ -18,6 +18,11 @@
 #' Overlap is resolved **in order**: a parameter is assigned to the first
 #' block that matches it; later blocks do not steal names.
 #'
+#' **Singleton blocks** (only one parameter after resolution) are not used as
+#' correlation clusters: those parameters are moved to **`remainder`** with a
+#' [warning()], because within-block correlations are undefined for a single
+#' column.
+#'
 #' @param ... One or more block specifications: a character vector of names,
 #'   a `list()` of character vectors, a **formula** with tidy-select on the
 #'   RHS (e.g. `~ tidyselect::starts_with("b_")`), or any expression
@@ -262,6 +267,70 @@ partition_blocks <- function(...) {
 }
 
 
+#' Move singleton-parameter cluster blocks into remainder (blockwise only).
+#'
+#' A cluster block with a single parameter cannot support within-block
+#' correlations; such blocks are dropped and those parameters are appended to
+#' `remainder`. Emits one [warning()] listing the moved parameters.
+#'
+#' @keywords internal
+#' @noRd
+.partition_demote_singleton_cluster_blocks <- function(partition, param_names) {
+  if (!inherits(partition, "poco_partition_clusters")) {
+    return(partition)
+  }
+  blocks <- partition$blocks %||% list()
+  if (!length(blocks)) {
+    return(partition)
+  }
+
+  singletons <- character()
+  kept <- list()
+  for (i in seq_along(blocks)) {
+    nm <- blocks[[i]]
+    if (length(nm) > 1L) {
+      kept[[length(kept) + 1L]] <- nm
+    } else if (length(nm) == 1L) {
+      singletons <- c(singletons, nm)
+    }
+  }
+
+  if (!length(singletons)) {
+    return(partition)
+  }
+
+  singletons <- unique(singletons[singletons %in% param_names])
+  rem_prev <- .partition_remainder(partition)
+  remainder <- unique(c(intersect(rem_prev, param_names), singletons))
+
+  if (length(kept)) {
+    names(kept) <- paste0("cluster_", seq_along(kept))
+  }
+
+  warning(
+    "Blockwise partition: ",
+    length(singletons),
+    " cluster block(s) contained only one parameter ",
+    "(within-block correlations are undefined); ",
+    "those parameters were moved to remainder: ",
+    paste(utils::head(singletons, 15L), collapse = ", "),
+    if (length(singletons) > 15L) ", ..." else "",
+    call. = FALSE
+  )
+
+  cluster_id <- rep(NA_integer_, length(param_names))
+  names(cluster_id) <- param_names
+  for (k in seq_along(kept)) {
+    cluster_id[kept[[k]]] <- as.integer(k)
+  }
+
+  partition$blocks <- kept
+  partition$remainder <- remainder
+  partition$cluster_id <- cluster_id
+  partition
+}
+
+
 #' Resolve parallel backend for cluster-block compression.
 #'
 #' @param cluster_BPPARAM `NULL` (auto), `FALSE` (sequential), or a
@@ -476,6 +545,7 @@ partition_blocks <- function(...) {
   }
 
   partition <- .align_partition_to_draws(partition, param_names)
+  partition <- .partition_demote_singleton_cluster_blocks(partition, param_names)
   blocks    <- partition$blocks %||% list()
   remainder <- .partition_remainder(partition)
 

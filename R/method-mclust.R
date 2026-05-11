@@ -84,7 +84,18 @@
   if (is.matrix(means_raw)) {
     means_mat <- means_raw
   } else {
-    means_mat <- matrix(means_raw, nrow = d, ncol = G)
+    means_mat <- matrix(as.numeric(means_raw), nrow = d, ncol = G)
+  }
+  # mclust sometimes returns a G x d matrix (e.g. univariate G means as a column).
+  if (nrow(means_mat) == G && ncol(means_mat) == d) {
+    means_mat <- t(means_mat)
+  }
+  if (nrow(means_mat) != d || ncol(means_mat) != G) {
+    stop(
+      "Unrecognised mclust mean dimensions: got ", nrow(means_mat), " x ",
+      ncol(means_mat), ", expected ", d, " x ", G, ".",
+      call. = FALSE
+    )
   }
 
   cov_raw <- fit$parameters$variance$sigma
@@ -240,7 +251,14 @@
   d <- dim(sigma)[1]
   G <- dim(sigma)[3]
   if (d <= 1L) {
-    return(list(values = sigma, type = "full"))
+    # Univariate: store as diagonal (1 x G) so sampling uses the diagonal
+    # path. If we kept a 1 x 1 x G array as "full", sigma[, , k] drops to a
+    # scalar and mvtnorm::rmvnorm / dmvnorm call isSymmetric() on a vector.
+    diag_mat <- matrix(NA_real_, nrow = 1L, ncol = G)
+    for (kk in seq_len(G)) {
+      diag_mat[1L, kk] <- sigma[1L, 1L, kk]
+    }
+    return(list(values = diag_mat, type = "diagonal"))
   }
   diag_mat <- matrix(NA_real_, nrow = d, ncol = G)
   for (k in seq_len(G)) {
@@ -268,7 +286,32 @@
     return("full")
   }
   if (is.matrix(comp$covariances)) {
-    return("shared")
+    d <- length(comp$param_names)
+    G <- comp$n_components
+    # Per-component diagonal storage is d x G (including univariate d = 1).
+    # Legacy objects saved without `covariance_type` used to treat any matrix
+    # as "shared", which breaks univariate 1 x G blocks.
+    if (
+      !is.null(G) &&
+      nrow(comp$covariances) == d &&
+      ncol(comp$covariances) == G
+    ) {
+      if (d == 1L || !identical(d, G) || !isSymmetric(comp$covariances)) {
+        return("diagonal")
+      }
+    }
+    if (
+      nrow(comp$covariances) == ncol(comp$covariances) &&
+      nrow(comp$covariances) == d
+    ) {
+      return("shared")
+    }
+    stop(
+      "Legacy mclust object: cannot infer covariance layout from a ",
+      nrow(comp$covariances), " x ", ncol(comp$covariances),
+      " matrix (n_params = ", d, ", n_components = ", G, ").",
+      call. = FALSE
+    )
   }
   stop("Unknown mclust covariance structure.", call. = FALSE)
 }
@@ -280,7 +323,15 @@
 .mclust_sigma <- function(comp, k, cov_type = .resolve_covariance_type(comp)) {
   switch(
     cov_type,
-    full     = comp$covariances[, , k],
+    full     = {
+      sig <- comp$covariances[, , k]
+      if (is.matrix(sig)) {
+        sig
+      } else {
+        d0 <- nrow(comp$means)
+        matrix(as.numeric(sig), nrow = d0, ncol = d0)
+      }
+    },
     shared   = comp$covariances,
     diagonal = diag(comp$covariances[, k], nrow = nrow(comp$covariances)),
     stop("Unknown mclust covariance_type: ", cov_type, call. = FALSE)
@@ -318,7 +369,18 @@
       )
       return(c("E", "V"))
     }
-    return(intersect(model_name, c("E", "V")))
+    uni <- intersect(model_name, c("E", "V"))
+    if (length(uni)) {
+      return(uni)
+    }
+    # Multivariate-only names (e.g. diagonal EII/VII/... from blockwise remainder)
+    # do not apply when d = 1; mclust univariate mixtures use E and V.
+    .message(
+      "mclust: univariate data (d = 1); ",
+      "using c('E', 'V') instead of multivariate model names ",
+      "(n = ", n, ")."
+    )
+    return(c("E", "V"))
   }
 
   if (is.null(model_name)) {
