@@ -33,9 +33,13 @@
 #'   (`progressbar` on `MulticoreParam` / `SnowParam`), prints cluster-fit
 #'   completion counts in sequential mode, and reports the remainder block.
 #'   Backend (`mclust` / `mvdens`) fitting is kept silent inside blockwise mode.
-#' @param partition Optional [partition_parameters_clusters()] output, or a
-#'   **manual** cluster list from [partition_blocks()] / a plain `list()` of
-#'   character vectors (see [partition_blocks()]). When supplied, the posterior
+#' @param partition Optional [partition_parameters_clusters()] return value
+#'   (default **`simple_output = TRUE`**: plain `list()` of cluster vectors),
+#'   its full **`poco_partition_clusters`** form when
+#'   **`simple_output = FALSE`**, or a **manual** cluster list from
+#'   [partition_blocks()] / a plain `list()` of character vectors (see
+#'   [partition_blocks()]; **`list()`** means compress the full posterior as
+#'   a single remainder block). When supplied, the posterior
 #'   is compressed **blockwise**: each cluster is fitted on its own
 #'   (typically with a richer covariance family,
 #'   `cluster_model_name`), the **remainder** is fitted with the cheaper

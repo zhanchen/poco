@@ -113,7 +113,7 @@ test_that("blockwise errors when partition references missing parameters", {
   part  <- partition_parameters_clusters(cm, threshold = 0.5, min_size = 2L)
 
   # Inject a parameter name that is not in draws.
-  part$blocks$cluster_1 <- c(part$blocks$cluster_1, "ghost_param")
+  part$cluster_1 <- c(part$cluster_1, "ghost_param")
 
   expect_error(
     compress_posterior(
@@ -243,6 +243,21 @@ test_that("blockwise integrates with reconstruct_brmsfit() (full round-trip)", {
     expect_true("divergent__" %in% colnames(mat))
   }
   expect_no_error(capture.output(print(recon)))
+})
+
+test_that("empty partition list() coerces to all-remainder blockwise", {
+  draws <- make_blockwise_draws()
+  comp <- suppressWarnings(
+    compress_posterior(
+      draws,
+      method       = "mclust",
+      n_components = 2L,
+      partition    = list()
+    )
+  )
+  expect_s3_class(comp, "posterior_compressed_blockwise")
+  expect_true("remainder" %in% names(comp$blocks))
+  expect_length(comp$cluster_block_names, 0L)
 })
 
 test_that("plain list of character vectors coerces to blockwise partition", {

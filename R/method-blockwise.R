@@ -29,7 +29,8 @@
 #'   resolution against actual parameter names happens during compression.
 #'
 #' @seealso [compress_posterior()], [compress_brmsfit()],
-#'   [partition_parameters_clusters()].
+#'   [partition_parameters_clusters()] (default **`simple_output = TRUE`**
+#'   plain list, or **`simple_output = FALSE`** for the full object).
 #' @export
 #' @examples
 #' \dontrun{
@@ -75,7 +76,7 @@ partition_blocks <- function(...) {
     return(FALSE)
   }
   any(
-    c("blocks", "cluster_id", "remainder", "hclust", "params", "rest") %in% nm
+    c("blocks", "cluster_id", "remainder", "hclust", "params") %in% nm
   )
 }
 
@@ -164,7 +165,6 @@ partition_blocks <- function(...) {
     hclust     = NULL,
     params     = list(source = "partition_manual")
   )
-  out$rest <- remainder
   class(out) <- c("poco_partition_clusters", "list")
   out
 }
@@ -183,9 +183,10 @@ partition_blocks <- function(...) {
     specs <- unclass(partition)
     return(.partition_from_block_list(specs, param_names))
   }
-  if (is.list(partition) &&
-        length(partition) >= 1L &&
-        !.block_partition_looks_reserved(partition)) {
+  # Includes `list()` (length 0): all parameters go to remainder (e.g.
+  # `partition_parameters_clusters(..., simple_output = TRUE)` when no cluster
+  # passes `min_size`).
+  if (is.list(partition) && !.block_partition_looks_reserved(partition)) {
     return(.partition_from_block_list(partition, param_names))
   }
   partition
@@ -256,7 +257,6 @@ partition_blocks <- function(...) {
 
   partition$blocks     <- new_blocks
   partition$remainder  <- remainder
-  partition$rest       <- remainder
   partition$cluster_id <- cluster_id
   partition
 }
@@ -467,10 +467,10 @@ partition_blocks <- function(...) {
 
   if (!inherits(partition, "poco_partition_clusters")) {
     stop(
-      "`partition` must be a `poco_partition_clusters` object ",
-      "(from `partition_parameters_clusters()`), ",
+      "`partition` must be coercible: output of ",
+      "`partition_parameters_clusters()` (default plain list or full object), ",
       "`partition_blocks()`, or a plain `list()` of character vectors ",
-      "(see `?partition_blocks`).",
+      "(see `?partition_blocks`; use `list()` for an all-remainder block).",
       call. = FALSE
     )
   }

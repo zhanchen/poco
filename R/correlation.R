@@ -125,10 +125,15 @@ posterior_correlation <- function(
 #'   a `patchwork` object when not `"none"`). Requires the `ggdendro` and
 #'   `patchwork` packages (Suggests); silently falls back to a plain heatmap
 #'   if either is missing.
-#' @param partition Optional output of [partition_parameters_clusters()]
-#'   (or any list with `cluster_id` and optionally `hclust`). When
-#'   provided, the heatmap is reordered to keep clusters contiguous and
-#'   each kept cluster is marked with a coloured outline and label.
+#' @param partition Optional [partition_parameters_clusters()] result
+#'   (**`simple_output = TRUE`**: plain list of cluster vectors; or
+#'   **`simple_output = FALSE`**: a `poco_partition_clusters` object), or any
+#'   list with the same fields as the full object (`cluster_id`, `blocks`,
+#'   `remainder`, ...). For **simple** lists (no `cluster_id`), cluster
+#'   outlines are drawn by mapping block membership to the **visible**
+#'   heatmap columns (after any `max_params_heatmap` subset and dendrogram
+#'   reorder). Parameters not in any block are treated as remainder for the
+#'   annotation subtitle.
 #' @param show_cluster_labels Logical or `NULL` (default). If `NULL`, on-plot
 #'   cluster **text** is omitted when there are many clusters or the heatmap
 #'   is dense (few parameters per block); outlines are always drawn. Use
@@ -380,15 +385,29 @@ partition_parameters <- function(
 #'   semantics), e.g. `tidyselect::starts_with("cor_")`,
 #'   `tidyselect::contains("gamma")`, or a `c()` / character vector of names.
 #'   Names must appear in `rownames(x)`.
+#' @param simple_output Logical. If `TRUE` (default), return a **plain**
+#'   [base::list()] of character vectors only: one element per kept cluster
+#'   (names `cluster_1`, `cluster_2`, ...), same shape as a manual
+#'   **`partition`** for [compress_posterior()] / [compress_brmsfit()]. All
+#'   **cluster-related metadata is omitted** (`cluster_id`, `hclust`,
+#'   `params`, and there is no `remainder` component). Parameters **not**
+#'   appearing in any list element are still the **remainder** for
+#'   blockwise compression: downstream code treats them as unclustered. If
+#'   `FALSE`, return the full **`poco_partition_clusters`** object below
+#'   (for [plot_posterior_correlation()] cluster outlines, printing, and
+#'   inspection of `remainder` explicitly).
 #'
-#' @return A list of class `"poco_partition_clusters"` with components:
+#' @return If **`simple_output`** is `TRUE`: a plain named `list` of
+#'   character vectors (`cluster_1`, `cluster_2`, ...), or **`list()`** when
+#'   no cluster passes **`min_size`** (all parameters are remainder for
+#'   [compress_posterior()] / [compress_brmsfit()]). If `FALSE`, a list
+#'   of class `"poco_partition_clusters"` with components:
 #'   \describe{
 #'     \item{`blocks`}{named list of character vectors (`cluster_1`,
 #'       `cluster_2`, ...), sorted by descending size;}
 #'     \item{`remainder`}{character vector of parameters not in any kept cluster;}
 #'     \item{`cluster_id`}{named integer vector mapping every parameter
 #'       to its kept-cluster id (1..K) or `NA` if it landed in `remainder`;}
-#'     \item{`rest`}{deprecated alias of `remainder` (same vector);}
 #'     \item{`hclust`}{the [stats::hclust()] object used for cutting and
 #'       for reordering (re-used by [plot_posterior_correlation()]);}
 #'     \item{`params`}{the rule's parameters (`threshold`, `k`, `min_size`
@@ -410,7 +429,11 @@ partition_parameters <- function(
 #' draws <- cbind(a, b)
 #' colnames(draws) <- c("a1", "a2", "a3", "b1", "b2", "b3", "b4")
 #' cm <- posterior_correlation(draws)
+#' # Default: plain list of clusters (pass-through to compress_* `partition`)
 #' partition_parameters_clusters(cm, threshold = 0.5, min_size = 2L)
+#' # Full metadata (heatmap outlines, `$remainder`, `$hclust`, ...)
+#' partition_parameters_clusters(cm, threshold = 0.5, min_size = 2L,
+#'   simple_output = FALSE)
 #' # Proportion in (0, 1): minimum size = ceiling(0.25 * ncol(cm))
 #' partition_parameters_clusters(cm, threshold = 0.5, min_size = 0.25)
 #' # Keep cor_* / residual correlations in the cheap remainder block:
@@ -424,7 +447,8 @@ partition_parameters_clusters <- function(
     k         = NULL,
     min_size  = 10L,
     linkage   = "average",
-    force_remainder = NULL) {
+    force_remainder = NULL,
+    simple_output = TRUE) {
   if (!is.matrix(x) || !is.numeric(x) || nrow(x) != ncol(x)) {
     stop("`x` must be a square numeric matrix.", call. = FALSE)
   }
@@ -576,6 +600,12 @@ partition_parameters_clusters <- function(
     params$force_remainder <- force_remainder_applied
   }
 
+  if (isTRUE(simple_output)) {
+    out <- blocks
+    class(out) <- "list"
+    return(out)
+  }
+
   out <- list(
     blocks     = blocks,
     remainder  = remainder,
@@ -583,7 +613,6 @@ partition_parameters_clusters <- function(
     hclust     = hc,
     params     = params
   )
-  out$rest <- out$remainder
   class(out) <- c("poco_partition_clusters", "list")
   out
 }
@@ -678,7 +707,7 @@ print.poco_partition <- function(x, ...) {
 `%||%` <- function(a, b) if (is.null(a)) b else a
 
 
-#' Parameters not assigned to any kept cluster (`remainder` or legacy `rest`).
+#' Parameters not assigned to any kept cluster (`remainder`).
 #' @keywords internal
 #' @noRd
 .partition_remainder <- function(partition) {
@@ -687,9 +716,6 @@ print.poco_partition <- function(x, ...) {
   }
   if (!is.null(partition$remainder)) {
     return(partition$remainder)
-  }
-  if (!is.null(partition$rest)) {
-    return(partition$rest)
   }
   character()
 }
@@ -763,6 +789,59 @@ print.poco_partition <- function(x, ...) {
 }
 
 
+#' Build `cluster_id` / `blocks` / `remainder` for heatmap annotation when
+#' `partition` is not a `poco_partition_clusters` object and has no
+#' `cluster_id` (e.g. [partition_parameters_clusters()] with default
+#' **`simple_output = TRUE`**, or any plain `list()` of character vectors
+#' suitable for `compress_*` `partition`). Visible columns only. Lists whose
+#' elements are not all non-empty character vectors are returned unchanged.
+#'
+#' @keywords internal
+#' @noRd
+.enrich_partition_for_heatmap_plot <- function(partition, visible, linkage) {
+  if (is.null(partition)) {
+    return(NULL)
+  }
+  if (inherits(partition, "poco_partition_clusters")) {
+    return(partition)
+  }
+  if (!is.null(partition[["cluster_id"]])) {
+    return(partition)
+  }
+  if (!is.list(partition) || !length(partition)) {
+    return(partition)
+  }
+  bl <- list()
+  for (i in seq_along(partition)) {
+    el <- partition[[i]]
+    if (!is.character(el) || !length(el)) {
+      return(partition)
+    }
+    hit <- intersect(el, visible)
+    hit <- unique(hit[nzchar(hit)])
+    if (length(hit)) {
+      bl[[length(bl) + 1L]] <- hit
+    }
+  }
+  if (!length(bl)) {
+    return(partition)
+  }
+  names(bl) <- paste0("cluster_", seq_along(bl))
+  rem <- setdiff(visible, unlist(bl, use.names = FALSE))
+  cid <- rep(NA_integer_, length(visible))
+  names(cid) <- visible
+  for (k in seq_along(bl)) {
+    cid[bl[[k]]] <- k
+  }
+  list(
+    blocks     = bl,
+    remainder  = rem,
+    cluster_id = cid,
+    params     = list(linkage = linkage)
+  )
+}
+
+
 #' @keywords internal
 #' @noRd
 .plot_corr_heatmap <- function(x, type, max_params_heatmap, abs_offdiag,
@@ -832,11 +911,17 @@ print.poco_partition <- function(x, ...) {
       legend.position = "right"
     )
 
-  if (!is.null(partition) && !is.null(partition$cluster_id)) {
+  partition_plot <- .enrich_partition_for_heatmap_plot(
+    partition,
+    colnames(x),
+    linkage
+  )
+
+  if (!is.null(partition_plot) && !is.null(partition_plot$cluster_id)) {
     visible <- colnames(x)
-    cid <- partition$cluster_id[visible]
+    cid <- partition_plot$cluster_id[visible]
     runs <- .contiguous_runs(cid)
-    n_blocks <- length(partition$blocks)
+    n_blocks <- length(partition_plot$blocks)
     auto_ann <- .auto_cluster_heatmap_annotation(n_blocks, length(visible))
     if (is.null(show_cluster_labels)) {
       show_cluster_labels <- auto_ann$show_cluster_labels
@@ -845,7 +930,7 @@ print.poco_partition <- function(x, ...) {
       show_cluster_legend <- auto_ann$show_cluster_legend
     }
     if (nrow(runs) > 0L) {
-      block_names <- names(partition$blocks)
+      block_names <- names(partition_plot$blocks)
       pal <- .cluster_outline_palette(block_names)
       lab <- ifelse(
         runs$cluster >= 1L & runs$cluster <= length(block_names),
@@ -925,7 +1010,7 @@ print.poco_partition <- function(x, ...) {
           )
       }
     }
-    n_rem <- length(.partition_remainder(partition))
+    n_rem <- length(.partition_remainder(partition_plot))
     if (length(stats::na.omit(as.integer(cid))) > 0L) {
       p <- p +
         ggplot2::labs(

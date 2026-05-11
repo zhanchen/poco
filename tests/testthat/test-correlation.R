@@ -98,15 +98,51 @@ test_that("plot_posterior_correlation returns ggplot objects when ggplot2 availa
   expect_s3_class(one, "ggplot")
 })
 
-test_that("partition_parameters_clusters returns remainder and rest alias", {
+test_that("plot_posterior_correlation heatmap accepts simple_output partition list", {
+  skip_if_not_installed("ggplot2")
   draws <- make_block_draws()
   cm <- posterior_correlation(draws)
-  pc <- partition_parameters_clusters(cm, threshold = 0.5, min_size = 2L)
+  pl <- partition_parameters_clusters(cm, threshold = 0.5, min_size = 2L)
+  expect_false(inherits(pl, "poco_partition_clusters"))
+  p <- plot_posterior_correlation(
+    cm,
+    which              = "heatmap",
+    max_params_heatmap = 50L,
+    partition          = pl
+  )
+  expect_s3_class(p, "ggplot")
+  layer_classes <- vapply(p$layers, function(l) class(l$geom)[1], character(1L))
+  expect_true("GeomRect" %in% layer_classes)
+})
+
+test_that("partition_parameters_clusters default returns plain cluster list", {
+  draws <- make_block_draws()
+  cm <- posterior_correlation(draws)
+  pl <- partition_parameters_clusters(cm, threshold = 0.5, min_size = 2L)
+  expect_identical(class(pl), "list")
+  expect_false(inherits(pl, "poco_partition_clusters"))
+  expect_true(length(pl) == 0L || all(grepl("^cluster_", names(pl))))
+  expect_false(
+    any(c("remainder", "blocks", "cluster_id", "hclust", "params") %in% names(pl))
+  )
+  pc <- partition_parameters_clusters(
+    cm, threshold = 0.5, min_size = 2L, simple_output = FALSE
+  )
+  expect_identical(pl, pc$blocks)
+  rem_plain <- setdiff(colnames(cm), unlist(pl, use.names = FALSE))
+  expect_setequal(rem_plain, pc$remainder)
+})
+
+test_that("partition_parameters_clusters returns remainder when simple_output = FALSE", {
+  draws <- make_block_draws()
+  cm <- posterior_correlation(draws)
+  pc <- partition_parameters_clusters(
+    cm, threshold = 0.5, min_size = 2L, simple_output = FALSE
+  )
 
   expect_s3_class(pc, "poco_partition_clusters")
   expect_true("remainder" %in% names(pc))
-  expect_true("rest" %in% names(pc))
-  expect_identical(pc$rest, pc$remainder)
+  expect_false("rest" %in% names(pc))
   expect_equal(
     length(pc$remainder) + sum(lengths(pc$blocks)),
     length(pc$cluster_id)
@@ -120,7 +156,9 @@ test_that("partition_parameters_clusters interprets min_size in (0,1) as proport
   n <- ncol(cm)
   prop <- 0.25
   pc <- suppressMessages(
-    partition_parameters_clusters(cm, threshold = 0.5, min_size = prop)
+    partition_parameters_clusters(
+      cm, threshold = 0.5, min_size = prop, simple_output = FALSE
+    )
   )
   expect_equal(pc$params$min_size, as.integer(ceiling(prop * n)))
   expect_equal(pc$params$min_size_proportion, prop)
@@ -130,7 +168,9 @@ test_that("partition_parameters_clusters clamps integer min_size below 2", {
   draws <- make_block_draws()
   cm <- posterior_correlation(draws)
   expect_warning(
-    pc <- partition_parameters_clusters(cm, threshold = 0.5, min_size = 1L),
+    pc <- partition_parameters_clusters(
+      cm, threshold = 0.5, min_size = 1L, simple_output = FALSE
+    ),
     "minimum allowed effective cluster size is 2"
   )
   expect_equal(pc$params$min_size, 2L)
@@ -142,7 +182,9 @@ test_that("partition_parameters_clusters clamps tiny proportional min_size below
   prop <- 0.01
   expect_warning(
     pc <- suppressMessages(
-      partition_parameters_clusters(cm, threshold = 0.5, min_size = prop)
+      partition_parameters_clusters(
+        cm, threshold = 0.5, min_size = prop, simple_output = FALSE
+      )
     ),
     "minimum allowed effective cluster size is 2"
   )
@@ -154,7 +196,9 @@ test_that("partition_parameters_clusters autocorrects negative count min_size", 
   draws <- make_block_draws()
   cm <- posterior_correlation(draws)
   expect_warning(
-    pc <- partition_parameters_clusters(cm, threshold = 0.5, min_size = -3),
+    pc <- partition_parameters_clusters(
+      cm, threshold = 0.5, min_size = -3, simple_output = FALSE
+    ),
     "negative"
   )
   expect_equal(pc$params$min_size, 3L)
@@ -164,7 +208,9 @@ test_that("partition_parameters_clusters autocorrects non-integer count min_size
   draws <- make_block_draws()
   cm <- posterior_correlation(draws)
   expect_warning(
-    pc <- partition_parameters_clusters(cm, threshold = 0.5, min_size = 3.2),
+    pc <- partition_parameters_clusters(
+      cm, threshold = 0.5, min_size = 3.2, simple_output = FALSE
+    ),
     "ceiling"
   )
   expect_equal(pc$params$min_size, 4L)
@@ -175,9 +221,10 @@ test_that("partition_parameters_clusters force_remainder sends names to remainde
   cm <- posterior_correlation(draws)
   pc <- partition_parameters_clusters(
     cm,
-    threshold       = 0.5,
-    min_size        = 2L,
-    force_remainder = c("a1", "a2", "a3")
+    threshold = 0.5,
+    min_size = 2L,
+    force_remainder = c("a1", "a2", "a3"),
+    simple_output = FALSE
   )
   expect_true(all(c("a1", "a2", "a3") %in% pc$remainder))
   in_blocks <- unlist(pc$blocks, use.names = FALSE)
@@ -194,9 +241,10 @@ test_that("partition_parameters_clusters force_remainder accepts tidyselect", {
   cm <- posterior_correlation(draws)
   pc <- partition_parameters_clusters(
     cm,
-    threshold       = 0.5,
-    min_size        = 2L,
-    force_remainder = tidyselect::starts_with("a")
+    threshold = 0.5,
+    min_size = 2L,
+    force_remainder = tidyselect::starts_with("a"),
+    simple_output = FALSE
   )
   expect_true(all(c("a1", "a2", "a3") %in% pc$remainder))
   in_blocks <- unlist(pc$blocks, use.names = FALSE)
