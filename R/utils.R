@@ -8,6 +8,13 @@
 #' * data.frame: coerced via [as.matrix()]
 #' * `posterior::draws_*` objects: converted via
 #'   `posterior::as_draws_matrix()` (requires the `posterior` package)
+#' * `brms::brmsfit` and `rstan::stanfit`: draws via
+#'   `posterior::as_draws_matrix()` (requires `posterior`; `brms` for
+#'   `brmsfit` conversion)
+#' * `cmdstanr::CmdStanMCMC`: `fit$draws(..., format = "matrix")` (requires
+#'   `cmdstanr`)
+#' * any other object `posterior::as_draws_matrix()` accepts, if `posterior`
+#'   is installed (attempted last)
 #' * 3-D array (iter x chain x var): collapsed across iter/chain
 #'
 #' @param draws An object containing posterior draws.
@@ -34,6 +41,26 @@
       )
     }
     mat <- as.matrix(posterior::as_draws_matrix(draws))
+  } else if (inherits(draws, "brmsfit") || inherits(draws, "stanfit")) {
+    if (!requireNamespace("posterior", quietly = TRUE)) {
+      stop(
+        "Package 'posterior' is required to extract draws from objects of class '",
+        paste(class(draws), collapse = "/"), "'.\n",
+        "  install.packages('posterior')",
+        call. = FALSE
+      )
+    }
+    mat <- as.matrix(posterior::as_draws_matrix(draws))
+  } else if (inherits(draws, "CmdStanMCMC")) {
+    if (!requireNamespace("cmdstanr", quietly = TRUE)) {
+      stop(
+        "Package 'cmdstanr' is required for CmdStanMCMC objects.\n",
+        "  https://mc-stan.org/cmdstanr",
+        call. = FALSE
+      )
+    }
+    mat <- draws$draws(variables = variables, format = "matrix")
+    storage.mode(mat) <- "double"
   } else if (is.array(draws) && length(dim(draws)) == 3L) {
     d <- dim(draws)
     nm <- dimnames(draws)[[3]]
@@ -43,6 +70,11 @@
       ncol = d[3]
     )
     colnames(mat) <- nm
+  } else if (requireNamespace("posterior", quietly = TRUE)) {
+    mat <- tryCatch(
+      as.matrix(posterior::as_draws_matrix(draws)),
+      error = function(e) NULL
+    )
   }
 
   if (is.null(mat)) {

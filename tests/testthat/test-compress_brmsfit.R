@@ -64,6 +64,11 @@ test_that("compress_brmsfit + reconstruct_brmsfit (integration)", {
   )
   expect_no_error(ensure_brms_cmdstanr(fit))
 
+  expect_no_error(pc <- posterior_correlation(fit))
+  expect_s3_class(pc, "posterior_correlation")
+  expect_true(ncol(pc) >= 2L)
+  expect_equal(attr(pc, "n_draws"), nrow(as.matrix(posterior::as_draws_matrix(fit))))
+
   res <- compress_brmsfit(fit, method = "mclust", n_components = 2)
   expect_named(res, c("compressed", "structure"))
   expect_s3_class(res$compressed, "posterior_compressed_mclust")

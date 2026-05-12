@@ -11,6 +11,9 @@
 #'     \item a `data.frame` of draws (one column per parameter);
 #'     \item any object the `posterior` package can convert with
 #'       `posterior::as_draws_matrix()` (`draws_matrix`, `draws_array`, ...);
+#'     \item a `brms::brmsfit` or `rstan::stanfit` (via
+#'       `posterior::as_draws_matrix()`; requires `posterior`);
+#'     \item a `cmdstanr::CmdStanMCMC` object (requires `cmdstanr`);
 #'     \item a 3-D array of shape `iter x chain x var`.
 #'   }
 #' @param method One of `r paste(shQuote(compression_methods()), collapse = ", ")`.

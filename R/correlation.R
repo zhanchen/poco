@@ -13,7 +13,11 @@
 #' that keeps within-component covariance only for the most strongly
 #' correlated parameters.
 #'
-#' @param draws Draws-like input (see [compress_posterior()]).
+#' @param draws Draws-like input (see [compress_posterior()]): matrix,
+#'   `data.frame`, `posterior::draws_*`, 3-D iter x chain x var array,
+#'   `brms::brmsfit`, `rstan::stanfit`, `cmdstanr::CmdStanMCMC`, or any
+#'   object [posterior::as_draws_matrix()] accepts when the `posterior`
+#'   package is installed.
 #' @param type One of `"correlation"` (default) or `"covariance"`.
 #' @param variables Optional character vector of parameters to keep.
 #' @param method Correlation method: one of `"pearson"` (default),
