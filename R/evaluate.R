@@ -34,12 +34,19 @@
 #' **Blockwise** objects (`method = "blockwise"`): [sample_posterior()]
 #' draws each block independently and re-assembles columns, so the
 #' reconstructed **joint** distribution treats **between-block**
-#' correlations as zero. Reference MCMC draws usually retain those
-#' correlations. Energy distance and C2ST are **joint** tests in
-#' `n_params` dimensions, so scores are often **much lower** than for a
-#' single-block compression on the same data — that is expected, not a
-#' fitting bug. The returned object includes `blockwise` and
-#' `base_method` so you can see which case you are in.
+#' correlations as zero and does not reproduce coupling from one shared
+#' latent state across blocks. Reference MCMC draws usually retain those
+#' dependencies. Energy distance and C2ST are **joint** tests in
+#' `n_params` dimensions, so scores are often **lower** than for
+#' single-block compression on the same data — **especially** when the
+#' single-block fit uses **full** mixture covariances (e.g. mclust
+#' `"VVV"`-style models selected when `nrow(draws) > ncol(draws)`), which
+#' can better align with off-diagonal structure in the reference. That
+#' gap is expected, not a fitting bug. On the `compression_fidelity`
+#' object, `blockwise` flags the partition layout; `method` names the
+#' compression **backend** (e.g. `"mclust"`, `"mvdens_gmm"`) — for
+#' blockwise input this is `comp$base_method`, not the string
+#' `"blockwise"`.
 #'
 #' For a strict out-of-sample evaluation, hold out a fraction of the
 #' draws \emph{before} fitting:
@@ -78,9 +85,9 @@
 #'     averaged across requested metrics.}
 #'   \item{`metrics`}{Named list with detailed per-metric results.}
 #'   \item{`n_reference`, `n_eval`, `n_params`}{Sample sizes used.}
-#'   \item{`method`}{Compression dispatch label (`"mclust"`, `"blockwise"`, etc.).}
-#'   \item{`base_method`}{For blockwise objects, the per-block backend
-#'     (e.g. `"mclust"`); otherwise same as `method` or `NA_character_`.}
+#'   \item{`method`}{Backend used to fit the density (`"mclust"`,
+#'     `"mvdens_gmm"`, `"mvdens_kde"`, etc.). For blockwise `comp`, this
+#'     is the per-block backend (`comp$base_method`), not `"blockwise"`.}
 #'   \item{`blockwise`}{`TRUE` if `comp` was blockwise.}
 #' }
 #'
@@ -174,7 +181,7 @@ evaluate_compression <- function(
   reproduction_pct <- if (length(pcts) > 0L) mean(pcts) else NA_real_
 
   is_bw <- inherits(comp, "posterior_compressed_blockwise")
-  base_m <- if (is_bw) {
+  method_backend <- if (is_bw) {
     as.character(comp$base_method %||% NA_character_)
   } else {
     as.character(comp$method %||% NA_character_)
@@ -186,8 +193,7 @@ evaluate_compression <- function(
     n_reference      = nrow(ref_used),
     n_eval           = nrow(recon_used),
     n_params         = ncol(ref_used),
-    method           = comp$method,
-    base_method      = base_m,
+    method           = method_backend,
     blockwise        = is_bw,
     param_names      = comp$param_names
   )
@@ -207,12 +213,7 @@ print.compression_fidelity <- function(x, ...) {
     x$method, x$n_params, x$n_reference, x$n_eval
   ))
   if (isTRUE(x$blockwise)) {
-    cat(sprintf(
-      "  blockwise     : TRUE (joint metrics vs reference — between-block correlations not in reconstruction; scores often lower than single-block compression)\n"
-    ))
-    if (!is.null(x$base_method) && !is.na(x$base_method)) {
-      cat(sprintf("  base_method   : %s\n", x$base_method))
-    }
+    cat("  blockwise     : TRUE\n")
   }
   cat("  ----------------------------------------\n")
   if (!is.null(x$metrics$energy)) {

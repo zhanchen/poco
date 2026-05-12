@@ -54,6 +54,19 @@ test_that("compress_posterior(partition = ...) builds a blockwise object", {
   rem_block <- comp$blocks$remainder
   expect_true(rem_block$model_name %in% c("EII", "VII", "EEI", "EVI", "VEI", "VVI"))
   expect_equal(rem_block$covariance_type, "diagonal")
+
+  fid <- evaluate_compression(
+    comp,
+    reference_draws = draws,
+    metric          = "energy",
+    seed            = 1L,
+    n_self_reps     = 3L,
+    max_n           = 300L
+  )
+  expect_s3_class(fid, "compression_fidelity")
+  expect_equal(fid$method, "mclust")
+  expect_true(fid$blockwise)
+  expect_false("base_method" %in% names(fid))
 })
 
 test_that("sample_posterior on a blockwise object recovers all params and order", {

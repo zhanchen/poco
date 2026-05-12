@@ -62,6 +62,10 @@ An S3 object of class \code{compression_fidelity} containing:
 averaged across requested metrics.}
 \item{\code{metrics}}{Named list with detailed per-metric results.}
 \item{\code{n_reference}, \code{n_eval}, \code{n_params}}{Sample sizes used.}
+\item{\code{method}}{Backend used to fit the density (\code{"mclust"},
+\code{"mvdens_gmm"}, \code{"mvdens_kde"}, etc.). For blockwise \code{comp}, this
+is the per-block backend (\code{comp$base_method}), not \code{"blockwise"}.}
+\item{\code{blockwise}}{\code{TRUE} if \code{comp} was blockwise.}
 }
 }
 \description{
@@ -96,6 +100,23 @@ Both metrics are computed only from samples and are independent of
 the compression backend (\code{mclust}, \code{mvdens_gmm}, \code{mvdens_kde}), so
 the score is not "circular": it does not depend on the same density
 model that produced the compression.
+
+\strong{Blockwise} objects (\code{method = "blockwise"}): \code{\link[=sample_posterior]{sample_posterior}()}
+draws each block independently and re-assembles columns, so the
+reconstructed \strong{joint} distribution treats \strong{between-block}
+correlations as zero and does not reproduce coupling from one shared
+latent state across blocks. Reference MCMC draws usually retain those
+dependencies. Energy distance and C2ST are \strong{joint} tests in
+\code{n_params} dimensions, so scores are often \strong{lower} than for
+single-block compression on the same data --- \strong{especially} when the
+single-block fit uses \strong{full} mixture covariances (e.g. mclust
+\code{"VVV"}-style models selected when \code{nrow(draws) > ncol(draws)}), which
+can better align with off-diagonal structure in the reference. That
+gap is expected, not a fitting bug. On the \code{compression_fidelity}
+object, \code{blockwise} flags the partition layout; \code{method} names the
+compression \strong{backend} (e.g. \code{"mclust"}, \code{"mvdens_gmm"}) --- for
+blockwise input this is \code{comp$base_method}, not the string
+\code{"blockwise"}.
 
 For a strict out-of-sample evaluation, hold out a fraction of the
 draws \emph{before} fitting:
