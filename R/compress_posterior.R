@@ -61,7 +61,9 @@
 #'   `method = "mclust"`, `poco` restricts BIC selection to the
 #'   **non-diagonal** ellipsoidal families (`EEE`/`VEE`/`EVE`/`VVE`/`EEV`/
 #'   `VEV`/`EVV`/`VVV`) so within-cluster correlations can be represented
-#'   when identifiable.
+#'   when identifiable. If that fit errors for a block (e.g. very many
+#'   parameters), the same block is retried once with the diagonal/spherical
+#'   family set and an informative message is shown.
 #' @param remainder_model_name `mclust` covariance structure to use for the
 #'   *remainder* block when `partition` is provided. If `NULL` (default) and
 #'   `method = "mclust"`, `poco` restricts BIC selection to the
@@ -80,6 +82,14 @@
 #'       parallel is skipped.}
 #'     \item{`FALSE`}{**Sequential:** always compress cluster blocks one by one,
 #'       even if **BiocParallel** is installed.}
+#'     \item{Single number}{**Worker count:** a single finite numeric value
+#'       (e.g. `2` or `2L`). Values below `2` (including `1`, `0.5`, negatives,
+#'       and non-finite values) are treated like `FALSE` (sequential), with an
+#'       informative message. Non-integers use [ceiling()] (e.g. \code{2.5}
+#'       becomes three workers). The count is capped by the number of cluster blocks and
+#'       `parallel::detectCores() - 1`; a message is shown when capping or
+#'       rounding applies. Builds `BiocParallel::MulticoreParam` (Unix-like) or
+#'       `BiocParallel::SnowParam` (Windows).}
 #'     \item{`BiocParallelParam`}{Use that object as `BPPARAM` in
 #'       `BiocParallel::bplapply()` (requires **BiocParallel** to be installed).}
 #'   }
@@ -254,7 +264,24 @@ compress_fit <- function(
 #' preserved.
 #'
 #' @param brmsfit A `brms::brmsfit` object using the cmdstanr backend.
-#' @inheritParams compress_posterior
+#' @param method Passed to [compress_posterior()]. See [compression_methods()].
+#' @param variables Passed to [compress_posterior()]: optional subset of
+#'   parameter columns after `posterior::as_draws_matrix(brmsfit)`.
+#' @param n_components Passed to [compress_posterior()].
+#' @param model_name Passed to [compress_posterior()] (ignored unless
+#'   `method = "mclust"`).
+#' @param verbose Passed to [compress_posterior()].
+#' @param partition Passed to [compress_posterior()] for blockwise compression;
+#'   see that function and [partition_parameters_clusters()], [partition_blocks()].
+#' @param cluster_model_name Passed to [compress_posterior()] when `partition`
+#'   is non-`NULL` (typically `method = "mclust"`).
+#' @param remainder_model_name Passed to [compress_posterior()] when `partition`
+#'   is non-`NULL` (typically `method = "mclust"`).
+#' @param cluster_BPPARAM Passed to [compress_posterior()] when `partition` is
+#'   non-`NULL` (parallel cluster blocks). See [compress_posterior()] for
+#'   allowed values (`NULL`, `FALSE`, a worker count, or a `BiocParallelParam`).
+#' @param ... Passed to [compress_posterior()] and then to the compression
+#'   backend (e.g. [mclust::Mclust()]).
 #'
 #' @return A list with two elements:
 #'   \describe{
@@ -264,7 +291,7 @@ compress_fit <- function(
 #'       a usable model).}
 #'   }
 #'
-#' @seealso [reconstruct_brmsfit()], [sample_posterior()],
+#' @seealso [compress_posterior()], [reconstruct_brmsfit()], [sample_posterior()],
 #'   [partition_parameters_clusters()], [partition_blocks()].
 #'
 #' @examples
@@ -283,7 +310,7 @@ compress_fit <- function(
 #'   method               = "mclust",
 #'   n_components         = 3,
 #'   partition            = part,
-#'   cluster_model_name   = NULL,    # auto, BIC across full covariance set
+#'   cluster_model_name   = NULL,    # auto: ellipsoidal set; diagonal retry on error
 #'   remainder_model_name = "VVI"
 #' )
 #'

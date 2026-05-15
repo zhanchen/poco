@@ -509,3 +509,72 @@ test_that("cluster_BPPARAM = FALSE forces sequential cluster compression", {
   expect_s3_class(comp, "posterior_compressed_blockwise")
   expect_equal(comp$n_params, ncol(draws))
 })
+
+test_that("cluster_BPPARAM numeric < 2 falls back to sequential with message", {
+  draws <- make_blockwise_draws()
+  cm    <- posterior_correlation(draws)
+  part  <- partition_parameters_clusters(cm, threshold = 0.5, min_size = 2L)
+  expect_message(
+    comp <- compress_posterior(
+      draws,
+      method          = "mclust",
+      n_components    = 2L,
+      partition       = part,
+      cluster_BPPARAM = 1
+    ),
+    "fewer than 2"
+  )
+  expect_s3_class(comp, "posterior_compressed_blockwise")
+})
+
+test_that("cluster_BPPARAM = integer worker count builds parallel backend", {
+  skip_if_not_installed("BiocParallel")
+  draws <- make_blockwise_draws()
+  cm    <- posterior_correlation(draws)
+  part  <- partition_parameters_clusters(cm, threshold = 0.5, min_size = 2L)
+  expect_message(
+    comp <- compress_posterior(
+      draws,
+      method          = "mclust",
+      n_components    = 2L,
+      partition       = part,
+      cluster_BPPARAM = 2L
+    ),
+    "cluster_BPPARAM = 2"
+  )
+  expect_s3_class(comp, "posterior_compressed_blockwise")
+})
+
+test_that("cluster_BPPARAM fractional uses ceiling and messages", {
+  skip_if_not_installed("BiocParallel")
+  draws <- make_blockwise_draws()
+  cm    <- posterior_correlation(draws)
+  part  <- partition_parameters_clusters(cm, threshold = 0.5, min_size = 2L)
+  expect_message(
+    comp <- compress_posterior(
+      draws,
+      method          = "mclust",
+      n_components    = 2L,
+      partition       = part,
+      cluster_BPPARAM = 2.5
+    ),
+    "ceiling"
+  )
+  expect_s3_class(comp, "posterior_compressed_blockwise")
+})
+
+test_that("cluster_BPPARAM rejects non-scalar numeric", {
+  draws <- make_blockwise_draws()
+  cm    <- posterior_correlation(draws)
+  part  <- partition_parameters_clusters(cm, threshold = 0.5, min_size = 2L)
+  expect_error(
+    compress_posterior(
+      draws,
+      method          = "mclust",
+      n_components    = 2L,
+      partition       = part,
+      cluster_BPPARAM = c(2, 3)
+    ),
+    "must be NULL"
+  )
+})

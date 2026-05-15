@@ -11,39 +11,41 @@ compress_brmsfit(
   n_components = 3L,
   model_name = NULL,
   verbose = FALSE,
+  partition = NULL,
+  cluster_model_name = NULL,
+  remainder_model_name = NULL,
+  cluster_BPPARAM = NULL,
   ...
 )
 }
 \arguments{
 \item{brmsfit}{A \code{brms::brmsfit} object using the cmdstanr backend.}
 
-\item{method}{One of 'mclust', 'mvdens_gmm', 'mvdens_kde'.
-See \code{\link[=compression_methods]{compression_methods()}}.}
+\item{method}{Passed to \code{\link[=compress_posterior]{compress_posterior()}}. See \code{\link[=compression_methods]{compression_methods()}}.}
 
-\item{variables}{Optional character vector of parameter names to keep.
-If \code{NULL} (default) all columns are used.}
+\item{variables}{Passed to \code{\link[=compress_posterior]{compress_posterior()}}: optional subset of parameter columns after \code{posterior::as_draws_matrix(brmsfit)}.}
 
-\item{n_components}{Integer number of mixture components (used by
-\code{"mclust"} and \code{"mvdens_gmm"}). Default \code{3}.}
+\item{n_components}{Passed to \code{\link[=compress_posterior]{compress_posterior()}}.}
 
-\item{model_name}{\code{mclust} covariance structure (e.g. \code{"VVV"}, \code{"EEE"},
-or a vector of allowed model names). Ignored by other methods.
-When \code{NULL} (default) \code{poco} auto-selects a sensible set: the
-spherical and diagonal models \code{c("EII", "VII", "EEI", "EVI", "VEI", "VVI")} are used when \code{nrow(draws) <= ncol(draws)} so covariances
-remain identifiable, otherwise mclust's full default set is used
-and BIC picks the best.}
+\item{model_name}{Passed to \code{\link[=compress_posterior]{compress_posterior()}} (ignored unless \code{method = "mclust"}).}
 
-\item{verbose}{Logical; print backend progress. Default \code{FALSE}.}
+\item{verbose}{Passed to \code{\link[=compress_posterior]{compress_posterior()}}.}
 
-\item{...}{Additional arguments forwarded to the backend (e.g.
-\code{\link[mclust:Mclust]{mclust::Mclust()}}).}
+\item{partition}{Passed to \code{\link[=compress_posterior]{compress_posterior()}} for blockwise compression; see that function and \code{\link[=partition_parameters_clusters]{partition_parameters_clusters()}}, \code{\link[=partition_blocks]{partition_blocks()}}.}
+
+\item{cluster_model_name}{Passed to \code{\link[=compress_posterior]{compress_posterior()}} when \code{partition} is non-\code{NULL} (typically \code{method = "mclust"}).}
+
+\item{remainder_model_name}{Passed to \code{\link[=compress_posterior]{compress_posterior()}} when \code{partition} is non-\code{NULL} (typically \code{method = "mclust"}).}
+
+\item{cluster_BPPARAM}{Passed to \code{\link[=compress_posterior]{compress_posterior()}} when \code{partition} is non-\code{NULL} (parallel cluster blocks). See \code{\link[=compress_posterior]{compress_posterior()}} for allowed values (\code{NULL}, \code{FALSE}, a worker count, or a \code{BiocParallelParam}).}
+
+\item{...}{Passed to \code{\link[=compress_posterior]{compress_posterior()}} and then to the compression backend (e.g. \code{\link[mclust:Mclust]{mclust::Mclust()}}).}
 }
 \value{
 A list with two elements:
 \describe{
-\item{compressed}{a \code{posterior_compressed} object;}
-\item{structure}{the brmsfit (so \code{\link[=reconstruct_brmsfit]{reconstruct_brmsfit()}} can rebuild
-a usable model).}
+\item{compressed}{a \code{posterior_compressed} object (or \code{posterior_compressed_blockwise} when \code{partition} is supplied);}
+\item{structure}{the brmsfit (so \code{\link[=reconstruct_brmsfit]{reconstruct_brmsfit()}} can rebuild a usable model).}
 }
 }
 \description{
@@ -61,7 +63,22 @@ preserved.
 \examples{
 \dontrun{
 fit <- brms::brm(y ~ x, data = dat, backend = "cmdstanr")
+# Single-block compression (existing default).
 result <- compress_brmsfit(fit, method = "mclust", n_components = 5)
+
+# Hybrid blockwise compression: rich covariance per cluster, diagonal
+# ("VVI") for the remainder block.
+draws <- posterior::as_draws_matrix(fit)
+cm    <- posterior_correlation(draws)
+part  <- partition_parameters_clusters(cm, threshold = 0.4, min_size = 0.02)
+result_block <- compress_brmsfit(
+  fit,
+  method               = "mclust",
+  n_components         = 3,
+  partition            = part,
+  cluster_model_name   = NULL,
+  remainder_model_name = "VVI"
+)
 
 saveRDS(result$compressed, "model_compressed.rds", compress = "xz")
 saveRDS(result$structure,  "model_structure.rds")
@@ -71,5 +88,7 @@ fit_recon <- reconstruct_brmsfit(result)
 
 }
 \seealso{
-\code{\link[=reconstruct_brmsfit]{reconstruct_brmsfit()}}, \code{\link[=sample_posterior]{sample_posterior()}}.
+\code{\link[=reconstruct_brmsfit]{reconstruct_brmsfit()}}, \code{\link[=sample_posterior]{sample_posterior()}},
+\code{\link[=partition_parameters_clusters]{partition_parameters_clusters()}}, \code{\link[=partition_blocks]{partition_blocks()}},
+\code{\link[=compress_posterior]{compress_posterior()}}.
 }

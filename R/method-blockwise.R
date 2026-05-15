@@ -331,10 +331,57 @@ partition_blocks <- function(...) {
 }
 
 
+#' Upper bound on parallel workers from cluster-block count and CPUs.
+#'
+#' @keywords internal
+#' @noRd
+.bp_cluster_worker_cap <- function(n_cluster_blocks) {
+  nb <- as.integer(n_cluster_blocks)
+  if (length(nb) != 1L || is.na(nb) || nb < 1L) {
+    return(1L)
+  }
+  dc <- parallel::detectCores()
+  if (is.na(dc) || dc < 2L) {
+    dc <- 2L
+  }
+  min(nb, max(1L, as.integer(dc) - 1L))
+}
+
+
+#' Build `SnowParam` / `MulticoreParam` for cluster-block `bplapply()`.
+#'
+#' @return A `BiocParallelParam`, or `NULL` if **BiocParallel** is not installed.
+#'
+#' @keywords internal
+#' @noRd
+.bp_new_cluster_parallel_param <- function(workers, verbose = FALSE) {
+  if (!requireNamespace("BiocParallel", quietly = TRUE)) {
+    return(NULL)
+  }
+  workers <- max(1L, as.integer(workers))
+  .bp_mk_param <- function(constructor, w, show_bar) {
+    args <- list(workers = as.integer(w))
+    if (isTRUE(show_bar)) {
+      args$progressbar <- TRUE
+    }
+    tryCatch(
+      do.call(constructor, args),
+      error = function(e) do.call(constructor, list(workers = args$workers))
+    )
+  }
+  if (identical(.Platform$OS.type, "windows")) {
+    .bp_mk_param(BiocParallel::SnowParam, workers, verbose)
+  } else {
+    .bp_mk_param(BiocParallel::MulticoreParam, workers, verbose)
+  }
+}
+
+
 #' Resolve parallel backend for cluster-block compression.
 #'
-#' @param cluster_BPPARAM `NULL` (auto), `FALSE` (sequential), or a
-#'   `BiocParallelParam`.
+#' @param cluster_BPPARAM `NULL` (auto), `FALSE` (sequential), a single
+#'   non-negative numeric worker count (e.g. `2` or `2L`, coerced with
+#'   [ceiling()] when non-integer), or a `BiocParallelParam`.
 #' @param n_cluster_blocks Number of cluster blocks (not counting remainder).
 #'
 #' @return `NULL` for sequential [lapply()], else a `BiocParallelParam` for
@@ -352,23 +399,109 @@ partition_blocks <- function(...) {
   if (isFALSE(cluster_BPPARAM)) {
     return(NULL)
   }
+
   if (!is.null(cluster_BPPARAM)) {
-    if (!methods::is(cluster_BPPARAM, "BiocParallelParam")) {
-      stop(
-        "`cluster_BPPARAM` must be NULL (auto), FALSE (sequential), ",
-        "or a BiocParallelParam object.",
-        call. = FALSE
-      )
+    if (methods::is(cluster_BPPARAM, "BiocParallelParam")) {
+      if (!requireNamespace("BiocParallel", quietly = TRUE)) {
+        stop(
+          "Install BiocParallel to use a custom parallel backend ",
+          "(BiocManager::install(\"BiocParallel\")).",
+          call. = FALSE
+        )
+      }
+      return(cluster_BPPARAM)
     }
-    if (!requireNamespace("BiocParallel", quietly = TRUE)) {
-      stop(
-        "Install BiocParallel to use a custom parallel backend ",
-        "(BiocManager::install(\"BiocParallel\")).",
-        call. = FALSE
+
+    if (length(cluster_BPPARAM) == 1L &&
+        is.numeric(cluster_BPPARAM) &&
+        !is.logical(cluster_BPPARAM)) {
+      raw_disp <- cluster_BPPARAM
+      raw <- suppressWarnings(as.numeric(cluster_BPPARAM))
+      if (is.na(raw) || !is.finite(raw)) {
+        .message(
+          "cluster_BPPARAM = ", raw_disp,
+          " is not a finite number; using sequential cluster compression."
+        )
+        return(NULL)
+      }
+      if (raw < 2) {
+        .message(
+          "cluster_BPPARAM = ", raw_disp,
+          " requests fewer than 2 parallel workers; using sequential cluster ",
+          "compression (same as cluster_BPPARAM = FALSE)."
+        )
+        return(NULL)
+      }
+
+      req <- as.integer(ceiling(raw))
+      cap <- .bp_cluster_worker_cap(n_cluster_blocks)
+      w_final <- min(req, cap)
+
+      kind <- if (identical(.Platform$OS.type, "windows")) {
+        "BiocParallel::SnowParam"
+      } else {
+        "BiocParallel::MulticoreParam"
+      }
+
+      if (w_final < 2L) {
+        .message(
+          "cluster_BPPARAM = ", raw_disp,
+          " (ceiling = ", req, " worker",
+          if (!identical(req, 1L)) "s" else "",
+          "): fewer than 2 parallel workers are available (cluster blocks = ",
+          n_cluster_blocks, ", worker cap = ", cap,
+          "). Using sequential cluster compression."
+        )
+        return(NULL)
+      }
+
+      parts <- character()
+      if (abs(raw - as.double(req)) > 1e-12) {
+        parts <- c(
+          parts,
+          paste0("ceiling(", raw_disp, ") = ", req, " worker",
+                 if (!identical(req, 1L)) "s" else "")
+        )
+      }
+      if (w_final < req) {
+        parts <- c(
+          parts,
+          paste0("capped ", req, " to ", w_final, " (max ", cap,
+                 " from cluster blocks / CPUs)")
+        )
+      }
+
+      bp <- .bp_new_cluster_parallel_param(w_final, verbose)
+      if (is.null(bp)) {
+        message(
+          "BiocParallel is not installed; compressing cluster blocks sequentially. ",
+          "Install with BiocManager::install(\"BiocParallel\") to enable parallel ",
+          "cluster compression."
+        )
+        return(NULL)
+      }
+
+      msg_core <- paste0(
+        "cluster_BPPARAM = ", raw_disp, ": using ", w_final, " worker",
+        if (!identical(w_final, 1L)) "s" else "",
+        " via ", kind, "."
       )
+      if (length(parts)) {
+        .message(msg_core, " (", paste(parts, collapse = "; "), ")")
+      } else {
+        .message(msg_core)
+      }
+      return(bp)
     }
-    return(cluster_BPPARAM)
+
+    stop(
+      "`cluster_BPPARAM` must be NULL (auto), FALSE (sequential), ",
+      "a single numeric worker count (e.g. 2 or 2L), ",
+      "or a BiocParallelParam object.",
+      call. = FALSE
+    )
   }
+
   if (n_cluster_blocks < 2L) {
     return(NULL)
   }
@@ -381,32 +514,11 @@ partition_blocks <- function(...) {
     )
     return(NULL)
   }
-  dc <- parallel::detectCores()
-  if (is.na(dc) || dc < 2L) {
-    dc <- 2L
-  }
-  w <- min(
-    as.integer(n_cluster_blocks),
-    max(1L, as.integer(dc) - 1L)
-  )
+  w <- .bp_cluster_worker_cap(n_cluster_blocks)
   if (w < 2L) {
     return(NULL)
   }
-  .new_bp_with_progress <- function(constructor, workers, show_bar) {
-    args <- list(workers = as.integer(workers))
-    if (isTRUE(show_bar)) {
-      args$progressbar <- TRUE
-    }
-    tryCatch(
-      do.call(constructor, args),
-      error = function(e) do.call(constructor, list(workers = args$workers))
-    )
-  }
-  if (identical(.Platform$OS.type, "windows")) {
-    .new_bp_with_progress(BiocParallel::SnowParam, w, verbose)
-  } else {
-    .new_bp_with_progress(BiocParallel::MulticoreParam, w, verbose)
-  }
+  .bp_new_cluster_parallel_param(w, verbose)
 }
 
 
@@ -499,9 +611,11 @@ partition_blocks <- function(...) {
 #'
 #' Each cluster of `partition$blocks` is compressed independently with a
 #' typically richer covariance family (`cluster_model_name`, default
-#' auto-selected by mclust/BIC), and the leftover `partition$remainder`
-#' parameters are compressed together with a cheaper diagonal family
-#' (`remainder_model_name`, default `"VVI"`).
+#' ellipsoidal models with BIC selection). If that fit errors (e.g. block
+#' dimension too large), the same block is retried once with spherical /
+#' diagonal models when `cluster_model_name` was left at `NULL`. The leftover
+#' `partition$remainder` parameters are compressed together with a cheaper
+#' diagonal family (`remainder_model_name`, default spherical/diagonal set).
 #'
 #' The result is wrapped in a `posterior_compressed_blockwise` object
 #' that [sample_posterior()] and [density_posterior()] dispatch on:
@@ -554,10 +668,17 @@ partition_blocks <- function(...) {
 
   extra_args <- list(...)
 
+  # Spherical/diagonal mclust families (BIC among these). Used for remainder
+  # by default and as a cluster-block fallback when default ellipsoidal
+  # cluster fits fail (e.g. very large blocks).
+  mclust_diag_family <- c("EII", "VII", "EEI", "EVI", "VEI", "VVI")
+  cluster_mclust_diag_fallback <- FALSE
+
   # If the caller did not specify model families, enforce the intended
   # constraint: clusters use non-diagonal covariance families (BIC within
   # that set), remainder uses diagonal families (BIC within that set).
   if (identical(method, "mclust")) {
+    cluster_mclust_diag_fallback <- is.null(cluster_model_name)
     if (is.null(cluster_model_name)) {
       # Ellipsoidal (non-diagonal) family names. mclust will drop
       # unsupported ones as needed; our own mclust wrapper further
@@ -569,7 +690,7 @@ partition_blocks <- function(...) {
     }
     if (is.null(remainder_model_name)) {
       # Diagonal/spherical families only (fast + identifiable in high-d).
-      remainder_model_name <- c("EII", "VII", "EEI", "EVI", "VEI", "VVI")
+      remainder_model_name <- mclust_diag_family
     }
   }
 
@@ -607,7 +728,11 @@ partition_blocks <- function(...) {
     )
   }
 
-  compress_one_block <- function(name, members, model_name) {
+  compress_one_block <- function(
+      name,
+      members,
+      model_name,
+      use_cluster_diag_fallback = FALSE) {
     if (length(members) == 0L) {
       return(NULL)
     }
@@ -620,21 +745,43 @@ partition_blocks <- function(...) {
         length(members), " params)..."
       )
     }
-    comp <- do.call(
-      compress_posterior,
-      c(
-        list(
-          draws        = block_draws,
-          method       = method,
-          n_components = n_components,
-          model_name   = model_name,
-          # Keep backend fitting quiet; blockwise progress is reported here.
-          verbose      = FALSE,
-          partition    = NULL
-        ),
-        extra_args
+    run_compress <- function(mn) {
+      do.call(
+        compress_posterior,
+        c(
+          list(
+            draws        = block_draws,
+            method       = method,
+            n_components = n_components,
+            model_name   = mn,
+            # Keep backend fitting quiet; blockwise progress is reported here.
+            verbose      = FALSE,
+            partition    = NULL
+          ),
+          extra_args
+        )
       )
-    )
+    }
+    comp <- if (isTRUE(use_cluster_diag_fallback)) {
+      tryCatch(
+        run_compress(model_name),
+        error = function(e) {
+          # New line so this does not append to an active BiocParallel progress bar.
+          cat("\n", file = stderr())
+          .message(
+            "blockwise: mclust failed for cluster block \"", name, "\" (",
+            length(members), " parameters) using ellipsoidal covariance ",
+            "models. Retrying with spherical/diagonal models (BIC within ",
+            paste(mclust_diag_family, collapse = ", "), "). ",
+            "Original error: ", conditionMessage(e),
+            "\n"
+          )
+          run_compress(mclust_diag_family)
+        }
+      )
+    } else {
+      run_compress(model_name)
+    }
     list(name = name, members = members, comp = comp)
   }
 
@@ -643,7 +790,12 @@ partition_blocks <- function(...) {
     names(fitted_blocks) <- block_nms
     for (i in seq_along(block_nms)) {
       nm <- block_nms[[i]]
-      fitted_blocks[[nm]] <- compress_one_block(nm, blocks[[nm]], cluster_model_name)
+      fitted_blocks[[nm]] <- compress_one_block(
+        nm,
+        blocks[[nm]],
+        cluster_model_name,
+        use_cluster_diag_fallback = cluster_mclust_diag_fallback
+      )
       if (isTRUE(verbose)) {
         .message(
           "blockwise: fitted cluster ", i, "/", length(block_nms),
@@ -654,7 +806,14 @@ partition_blocks <- function(...) {
   } else {
     fitted_blocks <- BiocParallel::bplapply(
       block_nms,
-      function(nm) compress_one_block(nm, blocks[[nm]], cluster_model_name),
+      function(nm) {
+        compress_one_block(
+          nm,
+          blocks[[nm]],
+          cluster_model_name,
+          use_cluster_diag_fallback = cluster_mclust_diag_fallback
+        )
+      },
       BPPARAM = bp
     )
     names(fitted_blocks) <- block_nms
