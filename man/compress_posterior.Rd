@@ -11,6 +11,10 @@ compress_posterior(
   n_components = 3L,
   model_name = NULL,
   verbose = FALSE,
+  partition = NULL,
+  cluster_model_name = NULL,
+  remainder_model_name = NULL,
+  cluster_BPPARAM = NULL,
   ...
 )
 }
@@ -21,6 +25,9 @@ compress_posterior(
 \item a \code{data.frame} of draws (one column per parameter);
 \item any object the \code{posterior} package can convert with
 \code{posterior::as_draws_matrix()} (\code{draws_matrix}, \code{draws_array}, ...);
+\item a \code{brms::brmsfit} or \code{rstan::stanfit} (via
+\code{posterior::as_draws_matrix()}; requires \code{posterior});
+\item a \code{cmdstanr::CmdStanMCMC} object (requires \code{cmdstanr});
 \item a 3-D array of shape \verb{iter x chain x var}.
 }}
 
@@ -40,14 +47,83 @@ spherical and diagonal models \code{c("EII", "VII", "EEI", "EVI", "VEI", "VVI")}
 remain identifiable, otherwise mclust's full default set is used
 and BIC picks the best.}
 
-\item{verbose}{Logical; print backend progress. Default \code{FALSE}.}
+\item{verbose}{Logical; print blockwise progress messages. Default \code{FALSE}
+(silent). When \code{TRUE} and blockwise \code{partition} is used: prints whether
+cluster blocks run in parallel or sequentially, worker count
+(BiocParallel), enables the BiocParallel \strong{progress bar} when supported
+(\code{progressbar} on \code{MulticoreParam} / \code{SnowParam}), prints cluster-fit
+completion counts in sequential mode, and reports the remainder block.
+Backend (\code{mclust} / \code{mvdens}) fitting is kept silent inside blockwise mode.}
+
+\item{partition}{Optional \code{\link[=partition_parameters_clusters]{partition_parameters_clusters()}} return value
+(default \strong{\code{simple_output = TRUE}}: plain \code{list()} of cluster vectors),
+its full \strong{\code{poco_partition_clusters}} form when
+\strong{\code{simple_output = FALSE}}, or a \strong{manual} cluster list from
+\code{\link[=partition_blocks]{partition_blocks()}} / a plain \code{list()} of character vectors (see
+\code{\link[=partition_blocks]{partition_blocks()}}; \strong{\code{list()}} means compress the full posterior as
+a single remainder block). When supplied, the posterior
+is compressed \strong{blockwise}: each cluster is fitted on its own
+(typically with a richer covariance family,
+\code{cluster_model_name}), the \strong{remainder} is fitted with the cheaper
+diagonal \code{remainder_model_name}, and the per-block fits are wrapped in
+a \code{posterior_compressed_blockwise} object. Blocks are then assumed to
+be independent (within-block correlations preserved, between-block
+correlations dropped).
+
+Names are aligned to the draws \strong{before} fitting: any partition entry
+absent from the draws is \strong{dropped} with \code{\link[=warning]{warning()}}, and any draw
+column not appearing in a cluster or in \code{remainder} is \strong{added to
+remainder} with \code{\link[=warning]{warning()}}. This helps when the partition was built on
+a different variable set than \code{variables} / the \code{brmsfit} posterior.}
+
+\item{cluster_model_name}{\code{mclust} covariance structure to use for the
+\emph{cluster} blocks when \code{partition} is provided. If \code{NULL} (default) and
+\code{method = "mclust"}, \code{poco} restricts BIC selection to the
+\strong{non-diagonal} ellipsoidal families (\code{EEE}/\code{VEE}/\code{EVE}/\code{VVE}/\code{EEV}/
+\code{VEV}/\code{EVV}/\code{VVV}) so within-cluster correlations can be represented
+when identifiable. If that fit errors for a block (e.g. very many
+parameters), the same block is retried once with the diagonal/spherical
+family set and an informative message is shown.}
+
+\item{remainder_model_name}{\code{mclust} covariance structure to use for the
+\emph{remainder} block when \code{partition} is provided. If \code{NULL} (default) and
+\code{method = "mclust"}, \code{poco} restricts BIC selection to the
+\strong{diagonal/spherical} families (\code{EII}/\code{VII}/\code{EEI}/\code{EVI}/\code{VEI}/\code{VVI}).}
+
+\item{cluster_BPPARAM}{How to run \strong{cluster} block fits when \code{partition} is
+set (the \strong{remainder} block is always fitted afterward in the main
+process). One of:
+\describe{
+\item{\code{NULL} (default)}{\strong{Automatic.} If \strong{BiocParallel} is installed
+and there are at least two cluster blocks, cluster blocks are
+compressed in parallel via \code{BiocParallel::bplapply()} with worker count
+\code{min(n_cluster_blocks, max(1, parallel::detectCores() - 1))} (on
+Windows \code{SnowParam}, else \code{MulticoreParam}). If \strong{BiocParallel} is not
+installed, a \code{\link[=message]{message()}} encourages installation and blocks are fitted
+\strong{sequentially} (no error). With fewer than two cluster blocks,
+parallel is skipped.}
+\item{\code{FALSE}}{\strong{Sequential:} always compress cluster blocks one by one,
+even if \strong{BiocParallel} is installed.}
+\item{Single number}{\strong{Worker count:} a single finite numeric value
+(e.g. \code{2} or \code{2L}). Values below \code{2} (including \code{1}, \code{0.5}, negatives,
+and non-finite values) are treated like \code{FALSE} (sequential), with an
+informative message. Non-integers use \code{\link[=ceiling]{ceiling()}} (e.g. \code{2.5}
+becomes three workers). The count is capped by the number of cluster blocks and
+\code{parallel::detectCores() - 1}; a message is shown when capping or
+rounding applies. Builds \code{BiocParallel::MulticoreParam} (Unix-like) or
+\code{BiocParallel::SnowParam} (Windows).}
+\item{\code{BiocParallelParam}}{Use that object as \code{BPPARAM} in
+\code{BiocParallel::bplapply()} (requires \strong{BiocParallel} to be installed).}
+}}
 
 \item{...}{Additional arguments forwarded to the backend (e.g.
 \code{\link[mclust:Mclust]{mclust::Mclust()}}).}
 }
 \value{
 An S3 list of class \code{c("posterior_compressed_<method>", "posterior_compressed", "list")} containing the parameters of the
-fitted approximation.
+fitted approximation. When \code{partition} is provided, the class is
+\code{c("posterior_compressed_blockwise", "posterior_compressed", "list")}
+and \verb{$blocks} is a named list of per-block compressed objects.
 }
 \description{
 Fits a compact density approximation to a matrix of MCMC draws and
@@ -67,5 +143,6 @@ dim(new_samples)
 }
 \seealso{
 \code{\link[=compress_fit]{compress_fit()}}, \code{\link[=compress_brmsfit]{compress_brmsfit()}}, \code{\link[=compress_sccomp]{compress_sccomp()}},
-\code{\link[=sample_posterior]{sample_posterior()}}, \code{\link[=density_posterior]{density_posterior()}}.
+\code{\link[=sample_posterior]{sample_posterior()}}, \code{\link[=density_posterior]{density_posterior()}},
+\code{\link[=partition_parameters_clusters]{partition_parameters_clusters()}}, \code{\link[=partition_blocks]{partition_blocks()}}.
 }

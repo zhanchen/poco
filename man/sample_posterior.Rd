@@ -7,13 +7,16 @@
 sample_posterior(object, n_draws = NULL, ...)
 }
 \arguments{
-\item{object}{A \code{posterior_compressed} object, or a path to an \code{.rds}
-file containing one (a single string).}
+\item{object}{A \code{posterior_compressed} object (single-block or
+\code{posterior_compressed_blockwise}), or a path to an \code{.rds} file
+containing one.}
 
 \item{n_draws}{Integer number of samples to draw. If \code{NULL} (default),
 uses the original number of MCMC draws.}
 
-\item{...}{Currently unused.}
+\item{...}{Backend-specific options. Currently the only honoured option
+is \code{verbose = TRUE} for blockwise objects, which prints a per-block
+sampling progress message.}
 }
 \value{
 A numeric matrix of draws (rows = draws, cols = parameters).

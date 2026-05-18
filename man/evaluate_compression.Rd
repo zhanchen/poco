@@ -22,7 +22,8 @@ evaluate_compression(
 }
 \arguments{
 \item{comp}{A \code{posterior_compressed} object (or a path to an \code{.rds}
-file containing one).}
+file containing one), or the return value of \code{\link[=compress_brmsfit]{compress_brmsfit()}} /
+\code{\link[=compress_sccomp]{compress_sccomp()}} (\code{compressed_fit}: \verb{$compressed} is used).}
 
 \item{reference_draws}{A draws matrix, data.frame, or
 \verb{posterior::draws_*} object whose columns include all parameters
@@ -101,20 +102,20 @@ the compression backend (\code{mclust}, \code{mvdens_gmm}, \code{mvdens_kde}), s
 the score is not "circular": it does not depend on the same density
 model that produced the compression.
 
-\strong{Blockwise} objects (\code{method = "blockwise"}): \code{\link[=sample_posterior]{sample_posterior}()}
+\strong{Blockwise} objects (\code{method = "blockwise"}): \code{\link[=sample_posterior]{sample_posterior()}}
 draws each block independently and re-assembles columns, so the
 reconstructed \strong{joint} distribution treats \strong{between-block}
 correlations as zero and does not reproduce coupling from one shared
 latent state across blocks. Reference MCMC draws usually retain those
 dependencies. Energy distance and C2ST are \strong{joint} tests in
 \code{n_params} dimensions, so scores are often \strong{lower} than for
-single-block compression on the same data --- \strong{especially} when the
+single-block compression on the same data — \strong{especially} when the
 single-block fit uses \strong{full} mixture covariances (e.g. mclust
 \code{"VVV"}-style models selected when \code{nrow(draws) > ncol(draws)}), which
 can better align with off-diagonal structure in the reference. That
 gap is expected, not a fitting bug. On the \code{compression_fidelity}
 object, \code{blockwise} flags the partition layout; \code{method} names the
-compression \strong{backend} (e.g. \code{"mclust"}, \code{"mvdens_gmm"}) --- for
+compression \strong{backend} (e.g. \code{"mclust"}, \code{"mvdens_gmm"}) — for
 blockwise input this is \code{comp$base_method}, not the string
 \code{"blockwise"}.
 

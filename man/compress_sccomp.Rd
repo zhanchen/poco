@@ -35,7 +35,13 @@ spherical and diagonal models \code{c("EII", "VII", "EEI", "EVI", "VEI", "VVI")}
 remain identifiable, otherwise mclust's full default set is used
 and BIC picks the best.}
 
-\item{verbose}{Logical; print backend progress. Default \code{FALSE}.}
+\item{verbose}{Logical; print blockwise progress messages. Default \code{FALSE}
+(silent). When \code{TRUE} and blockwise \code{partition} is used: prints whether
+cluster blocks run in parallel or sequentially, worker count
+(BiocParallel), enables the BiocParallel \strong{progress bar} when supported
+(\code{progressbar} on \code{MulticoreParam} / \code{SnowParam}), prints cluster-fit
+completion counts in sequential mode, and reports the remainder block.
+Backend (\code{mclust} / \code{mvdens}) fitting is kept silent inside blockwise mode.}
 
 \item{remove_csvs}{Logical; if \code{TRUE}, delete the cmdstan CSV files
 after compression. Default \code{FALSE}.}

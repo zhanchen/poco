@@ -185,3 +185,91 @@ compression_methods <- function() {
 .size_pretty <- function(x) {
   format(x, big.mark = ",", scientific = FALSE)
 }
+
+
+#' Clear captured environments from a `brmsfit`
+#'
+#' `brms` attaches the calling environment to formula (and related) objects.
+#' When `brm()` is run inside `purrr::map()` or magrittr pipes, that
+#' environment can retain upstream objects (`bterms`, `bframe`, pipe
+#' placeholders, the fit object itself, etc.) and inflate serialized size
+#' dramatically even though posterior draws are small.
+#'
+#' This helper recursively clears those environments by setting them to
+#' `NULL` (including `terms` objects' `.Environment` attribute). The
+#' `brmsfit` class and posterior draws are unchanged.
+#'
+#' Apply directly to one fit, not with `lapply(fit, ...)` (which walks slots
+#' and returns a plain list):
+#'
+#' ```r
+#' fit_clean <- strip_brmsfit_envs(fit)
+#' # list-column:
+#' df$brms_fit <- lapply(df$brms_fit, strip_brmsfit_envs)
+#' ```
+#'
+#' @param x A [`brms::brmsfit`] object.
+#'
+#' @return `x`, invisibly, with formula environments cleared.
+#'
+#' @export
+strip_brmsfit_envs <- function(x) {
+  if (!inherits(x, "brmsfit")) {
+    stop(
+      "`x` must be a single brmsfit object. ",
+      "For a list of fits use `lapply(fit_list, strip_brmsfit_envs)`.",
+      call. = FALSE
+    )
+  }
+  invisible(.strip_brmsfit_envs_impl(x))
+}
+
+
+#' @keywords internal
+#' @noRd
+.clear_formula_env <- function(x) {
+  if (inherits(x, "formula") || inherits(x, "call")) {
+    try(environment(x) <- NULL, silent = TRUE)
+    return(x)
+  }
+  if (inherits(x, "terms")) {
+    if (!is.null(attr(x, ".Environment"))) {
+      attr(x, ".Environment") <- NULL
+    }
+    return(x)
+  }
+  x
+}
+
+
+#' @keywords internal
+#' @noRd
+.strip_brmsfit_envs_impl <- function(x) {
+  if (is.null(x) || isS4(x) || is.environment(x)) {
+    return(x)
+  }
+  if (inherits(x, "formula") || inherits(x, "terms") || inherits(x, "call")) {
+    return(.clear_formula_env(x))
+  }
+  if (is.data.frame(x)) {
+    for (j in seq_along(x)) {
+      x[[j]] <- .strip_brmsfit_envs_impl(x[[j]])
+    }
+    if (!is.null(attr(x, "terms"))) {
+      attr(x, "terms") <- .strip_brmsfit_envs_impl(attr(x, "terms"))
+    }
+    if (!is.null(attr(x, "formula"))) {
+      attr(x, "formula") <- .strip_brmsfit_envs_impl(attr(x, "formula"))
+    }
+    return(x)
+  }
+  if (is.list(x)) {
+    for (i in seq_along(x)) {
+      elt <- tryCatch(x[[i]], error = function(e) NULL)
+      if (!is.null(elt)) {
+        try(x[[i]] <- .strip_brmsfit_envs_impl(elt), silent = TRUE)
+      }
+    }
+  }
+  x
+}

@@ -255,8 +255,9 @@ compress_fit <- function(
 #'
 #' Convenience wrapper around [compress_posterior()] for `brms::brmsfit`
 #' objects. Returns a list with both the compressed posterior and the
-#' original fit `structure` (with `fit$fit` cleared) so the model can be
-#' reconstructed later via [reconstruct_brmsfit()].
+#' original fit `structure` (with `fit$fit` cleared and formula environments
+#' stripped via [strip_brmsfit_envs()]) so the model can be reconstructed
+#' later via [reconstruct_brmsfit()].
 #'
 #' Requires the `brms` model to have been fit with `backend = "cmdstanr"`.
 #' Draws are extracted via `posterior::as_draws_matrix()`, so brms's
@@ -543,11 +544,17 @@ compress_sccomp <- function(
 #' `c("compressed_<kind>", "compressed_fit", "list")` so [print()] does
 #' not dispatch to e.g. `print.brmsfit` on the draws-stripped structure
 #' (which can fail).
+#'
+#' For `kind = "brmsfit"`, runs [strip_brmsfit_envs()] on `structure_obj`
+#' so serialized compressed fits do not retain pipe / closure environments.
 #' @keywords internal
 #' @noRd
 .new_compressed_fit <- function(compressed, structure_obj,
                                 kind = c("brmsfit", "sccomp")) {
   kind <- match.arg(kind)
+  if (kind == "brmsfit" && inherits(structure_obj, "brmsfit")) {
+    structure_obj <- strip_brmsfit_envs(structure_obj)
+  }
   out <- list(compressed = compressed, structure = structure_obj)
   class(out) <- c(paste0("compressed_", kind), "compressed_fit", "list")
   out

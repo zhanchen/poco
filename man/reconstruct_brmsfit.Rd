@@ -15,7 +15,17 @@ separately-saved objects.}
 the original number of draws stored in \code{x$structure}.}
 }
 \value{
-A \code{brmsfit} object with regenerated draws.
+A \code{brmsfit} object with regenerated draws and the following
+informational attributes:
+\describe{
+\item{\code{compression_method}}{\code{comp$method} (e.g. \code{"mclust"} or
+\code{"blockwise"});}
+\item{\code{compression_base_method}}{for blockwise compressions, the
+per-block backend (e.g. \code{"mclust"}); \code{NA_character_} otherwise;}
+\item{\code{compression_blocks}}{for blockwise compressions, an integer
+vector of per-block parameter counts (named after the block);}
+\item{\code{reconstructed}}{\code{TRUE}.}
+}
 }
 \description{
 Replaces the posterior draws of a \code{brmsfit} with samples regenerated
@@ -24,5 +34,12 @@ methods (\code{predict()}, \code{posterior_predict()}, \code{pp_check()},
 \code{conditional_effects()}, ...) keep working with the lighter object.
 }
 \details{
+Works with both single-block compressions
+(\code{posterior_compressed_mclust}, \verb{posterior_compressed_mvdens_*}) and
+the hybrid blockwise variant (\code{posterior_compressed_blockwise}).
+For blockwise objects, \code{\link[=sample_posterior]{sample_posterior()}} regenerates each block
+independently and re-aligns columns to the original parameter order
+before the per-chain refill below — no special handling is required.
+
 MCMC diagnostics (\code{Rhat}, \code{ESS}, ...) are not preserved.
 }

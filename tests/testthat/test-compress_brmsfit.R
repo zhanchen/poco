@@ -91,3 +91,38 @@ test_that("compress_brmsfit + reconstruct_brmsfit (integration)", {
   expect_true(nrow(draws_mat) > 0L)
   expect_equal(attr(recon, "compression_method"), "mclust")
 })
+
+test_that("compress_brmsfit strips formula environments from structure", {
+  skip_if_not(
+    instantiate::stan_cmdstan_exists(),
+    "CmdStan not installed"
+  )
+  expect_true(requireNamespace("brms", quietly = TRUE))
+  expect_true(requireNamespace("cmdstanr", quietly = TRUE))
+
+  set.seed(2)
+  dat <- data.frame(x = rnorm(30), y = rnorm(30))
+  fit <- brms::brm(
+    y ~ x,
+    data = dat,
+    chains = 2,
+    iter = 400,
+    warmup = 200,
+    backend = "cmdstanr",
+    refresh = 0,
+    silent = 2
+  )
+  fenv <- environment(fit$formula$formula)
+  if (!is.null(fenv)) {
+    fenv$blob <- rep(1, 1e5)
+  }
+
+  .serialized_bytes <- function(x) {
+    length(serialize(x, NULL, xdr = FALSE))
+  }
+  expect_gt(.serialized_bytes(fit), 1e5)
+
+  res <- compress_brmsfit(fit, method = "mclust", n_components = 2)
+  expect_true(is.null(environment(res$structure$formula$formula)))
+  expect_lt(.serialized_bytes(res$structure), .serialized_bytes(fit) / 5)
+})

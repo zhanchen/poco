@@ -23,36 +23,47 @@ compress_brmsfit(
 
 \item{method}{Passed to \code{\link[=compress_posterior]{compress_posterior()}}. See \code{\link[=compression_methods]{compression_methods()}}.}
 
-\item{variables}{Passed to \code{\link[=compress_posterior]{compress_posterior()}}: optional subset of parameter columns after \code{posterior::as_draws_matrix(brmsfit)}.}
+\item{variables}{Passed to \code{\link[=compress_posterior]{compress_posterior()}}: optional subset of
+parameter columns after \code{posterior::as_draws_matrix(brmsfit)}.}
 
 \item{n_components}{Passed to \code{\link[=compress_posterior]{compress_posterior()}}.}
 
-\item{model_name}{Passed to \code{\link[=compress_posterior]{compress_posterior()}} (ignored unless \code{method = "mclust"}).}
+\item{model_name}{Passed to \code{\link[=compress_posterior]{compress_posterior()}} (ignored unless
+\code{method = "mclust"}).}
 
 \item{verbose}{Passed to \code{\link[=compress_posterior]{compress_posterior()}}.}
 
-\item{partition}{Passed to \code{\link[=compress_posterior]{compress_posterior()}} for blockwise compression; see that function and \code{\link[=partition_parameters_clusters]{partition_parameters_clusters()}}, \code{\link[=partition_blocks]{partition_blocks()}}.}
+\item{partition}{Passed to \code{\link[=compress_posterior]{compress_posterior()}} for blockwise compression;
+see that function and \code{\link[=partition_parameters_clusters]{partition_parameters_clusters()}}, \code{\link[=partition_blocks]{partition_blocks()}}.}
 
-\item{cluster_model_name}{Passed to \code{\link[=compress_posterior]{compress_posterior()}} when \code{partition} is non-\code{NULL} (typically \code{method = "mclust"}).}
+\item{cluster_model_name}{Passed to \code{\link[=compress_posterior]{compress_posterior()}} when \code{partition}
+is non-\code{NULL} (typically \code{method = "mclust"}).}
 
-\item{remainder_model_name}{Passed to \code{\link[=compress_posterior]{compress_posterior()}} when \code{partition} is non-\code{NULL} (typically \code{method = "mclust"}).}
+\item{remainder_model_name}{Passed to \code{\link[=compress_posterior]{compress_posterior()}} when \code{partition}
+is non-\code{NULL} (typically \code{method = "mclust"}).}
 
-\item{cluster_BPPARAM}{Passed to \code{\link[=compress_posterior]{compress_posterior()}} when \code{partition} is non-\code{NULL} (parallel cluster blocks). See \code{\link[=compress_posterior]{compress_posterior()}} for allowed values (\code{NULL}, \code{FALSE}, a worker count, or a \code{BiocParallelParam}).}
+\item{cluster_BPPARAM}{Passed to \code{\link[=compress_posterior]{compress_posterior()}} when \code{partition} is
+non-\code{NULL} (parallel cluster blocks). See \code{\link[=compress_posterior]{compress_posterior()}} for
+allowed values (\code{NULL}, \code{FALSE}, a worker count, or a \code{BiocParallelParam}).}
 
-\item{...}{Passed to \code{\link[=compress_posterior]{compress_posterior()}} and then to the compression backend (e.g. \code{\link[mclust:Mclust]{mclust::Mclust()}}).}
+\item{...}{Passed to \code{\link[=compress_posterior]{compress_posterior()}} and then to the compression
+backend (e.g. \code{\link[mclust:Mclust]{mclust::Mclust()}}).}
 }
 \value{
 A list with two elements:
 \describe{
-\item{compressed}{a \code{posterior_compressed} object (or \code{posterior_compressed_blockwise} when \code{partition} is supplied);}
-\item{structure}{the brmsfit (so \code{\link[=reconstruct_brmsfit]{reconstruct_brmsfit()}} can rebuild a usable model).}
+\item{compressed}{a \code{posterior_compressed} object (or
+\code{posterior_compressed_blockwise} when \code{partition} is supplied);}
+\item{structure}{the brmsfit (so \code{\link[=reconstruct_brmsfit]{reconstruct_brmsfit()}} can rebuild
+a usable model).}
 }
 }
 \description{
 Convenience wrapper around \code{\link[=compress_posterior]{compress_posterior()}} for \code{brms::brmsfit}
 objects. Returns a list with both the compressed posterior and the
-original fit \code{structure} (with \code{fit$fit} cleared) so the model can be
-reconstructed later via \code{\link[=reconstruct_brmsfit]{reconstruct_brmsfit()}}.
+original fit \code{structure} (with \code{fit$fit} cleared and formula environments
+stripped via \code{\link[=strip_brmsfit_envs]{strip_brmsfit_envs()}}) so the model can be reconstructed
+later via \code{\link[=reconstruct_brmsfit]{reconstruct_brmsfit()}}.
 }
 \details{
 Requires the \code{brms} model to have been fit with \code{backend = "cmdstanr"}.
@@ -76,7 +87,7 @@ result_block <- compress_brmsfit(
   method               = "mclust",
   n_components         = 3,
   partition            = part,
-  cluster_model_name   = NULL,
+  cluster_model_name   = NULL,    # auto: ellipsoidal set; diagonal retry on error
   remainder_model_name = "VVI"
 )
 
@@ -88,7 +99,6 @@ fit_recon <- reconstruct_brmsfit(result)
 
 }
 \seealso{
-\code{\link[=reconstruct_brmsfit]{reconstruct_brmsfit()}}, \code{\link[=sample_posterior]{sample_posterior()}},
-\code{\link[=partition_parameters_clusters]{partition_parameters_clusters()}}, \code{\link[=partition_blocks]{partition_blocks()}},
-\code{\link[=compress_posterior]{compress_posterior()}}.
+\code{\link[=compress_posterior]{compress_posterior()}}, \code{\link[=reconstruct_brmsfit]{reconstruct_brmsfit()}}, \code{\link[=sample_posterior]{sample_posterior()}},
+\code{\link[=partition_parameters_clusters]{partition_parameters_clusters()}}, \code{\link[=partition_blocks]{partition_blocks()}}.
 }
