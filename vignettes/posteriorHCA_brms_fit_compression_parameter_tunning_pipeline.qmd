@@ -1,0 +1,1735 @@
+---
+title: "Tuning `compress_brmsfit` on posteriorHCA models"
+subtitle: "Benchmark report from the multi cell-type, multi-gene targets pipeline"
+date: today
+date-format: "DD MMM YYYY"
+title-block-banner: true
+author: 
+  - name: Chen Zhan
+    orcid: 0000-0002-4794-8339
+    email: chen.zhan@adelaide.edu.au
+    affiliation:
+      - id: sgc
+        name: SAiGENCI, The University of Adelaide
+format: 
+  html:
+    theme: minty
+    df-print: paged
+    code-line-numbers: true
+    embed-resources: true
+    code-fold: true
+    code-fold-default: true
+    toc: true
+    toc-location: left
+    toc-title: "Contents"
+knitr:
+  opts_chunk: 
+    message: false
+    warning: false
+    fig.path: ../../inst/figures/brms-parameter-tuning/
+    fig.ext: .png
+    dev: png
+    dpi: 150
+editor: source
+abstract: |
+  We compressed `brms` posteriors from the posteriorHCA differential-expression
+  workflow with **poco**, sweeping `n_components` and `corr_threshold` across
+  many cell types and genes. Fitting and evaluation were run in a separate
+  [`targets`](https://books.ropensci.org/targets/) pipeline; this document
+  summarises the saved grid (`evaluation_results_targets_V2.rds`): where
+  compression fails, how long it takes, which parameter pair works best on
+  average, whether cell types agree, and whether gene abundance shifts the
+  optimum.
+---
+
+## Setup
+
+```{r}
+#| label: setup
+
+# Figures are written as PNG under poco/inst/figures/brms-parameter-tuning/
+fig_dir <- "../../inst/figures/brms-parameter-tuning"
+dir.create(fig_dir, recursive = TRUE, showWarnings = FALSE)
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(scales)
+library(glue)
+library(forcats)
+library(stringr)
+library(patchwork)
+library(ggrepel)
+
+```
+
+## Reproducing the benchmark (optional)
+
+The grid was built with `posteriorHCA_brms_fit_compression_parameter_tunning_pipeline_V2.R` and `{targets}`. Re-run only when you need fresh fits:
+
+```{r}
+#| eval: false
+
+source("posteriorHCA_brms_fit_compression_parameter_tunning_pipeline_V2.R")
+targets::tar_make()
+```
+
+```{r}
+#| eval: false
+#| 
+compression_results <-
+  tar_meta(starts_with("compression_"), store = "_targets") %>%
+  filter(type == "branch") %>%
+  slice_sample(n = 1) %>% 
+  pull(name) %>%
+  map_dfr(~ {
+    t <- tar_read_raw(.x, store = "_targets")
+    
+    if (isTRUE(t$compression_ok)) {
+      
+      o <- tar_read_raw(
+      t$estimates_chunk_names, 
+      store = file.path(
+        '/hpcfs/groups/phoenix-hpc-mangiola_laboratory/chen/HPC_posterior/NEW_CELL_TYPE/', 
+        t$cell_type, 
+        '_targets'
+      )
+    )
+      
+      t$compression_size <- as.numeric(
+        lobstr::obj_size(t$compressed_obj[[1]]$compressed)
+      )
+      t$original_draw_size <- as.numeric(
+        lobstr::obj_size(o$brms_fit[[1]] %>% as_draws_matrix)
+      )
+      t$compression_rate <- t$compression_size / t$original_draw_size
+      
+    } else {
+      t$compression_size <- NA_real_
+      t$original_draw_size <- NA_real_
+      t$compression_rate <- NA_real_
+    }
+
+    t %>%
+      dplyr::select(-compressed_obj)
+  })
+
+```
+
+## Load results
+
+```{r}
+#| label: load-results
+
+param_tunning_long <- readRDS("evaluation_results_targets_V2.rds")
+compression_results_long <- readRDS('compression_size.rds')
+```
+
+## Prepare the tuning table
+
+Each row is one `(cell_type, gene, n_components, corr_threshold)` combination.
+Pseudobulk abundance (`mean_log2_cpm`) is included so we can relate the optimum
+to expression level later.
+
+```{r}
+#| label: tidy-param-tunning
+
+n_genes_per_ct <- param_tunning_long %>%
+  distinct(cell_type, .feature) %>%
+  count(cell_type, name = "n_genes")
+
+cat("Cell types and genes in the tuning grid:\n")
+print(n_genes_per_ct)
+cat("\nGrid: ",
+    n_distinct(param_tunning_long$n_components), " n_components x ",
+    n_distinct(param_tunning_long$corr_threshold), " corr_threshold values\n",
+    sep = "")
+```
+
+# 1. Compression failures
+
+Rows with `reproduction_pct == NA` did not receive a fidelity score—typically
+because the `brms` fit could not be read or `compress_brmsfit()` /
+`evaluate_compression()` failed for that grid cell. Mapping these gaps shows
+which parameter combinations, cell types, or genes to exclude before choosing
+defaults.
+
+```{r}
+#| label: failure-flag
+
+param_tunning_long <-
+  param_tunning_long %>%
+  mutate(failed = is.na(reproduction_pct))
+
+failure_overall <- param_tunning_long %>%
+  summarise(
+    n_total    = n(),
+    n_failed   = sum(failed),
+    pct_failed = 100 * mean(failed)
+  )
+
+cat(sprintf(
+  "Overall: %d / %d grid rows have reproduction_pct == NA (%.2f%%)\n",
+  failure_overall$n_failed,
+  failure_overall$n_total,
+  failure_overall$pct_failed
+))
+```
+
+When failure rates are low, treat the plots below as sanity checks; when they
+are high, use them to decide what to filter.
+
+## 1.1 Failure rate on the parameter grid
+
+A hot grid cell that fails for many genes and cell types usually indicates a
+parameter setting the compressor cannot handle (for example, too many mixture
+components for small correlation blocks), rather than a biological effect.
+
+```{r}
+#| label: failure-grid-heatmap
+#| fig-width: 9
+#| fig-height: 5
+
+failure_grid <-
+  param_tunning_long %>%
+  group_by(n_components, corr_threshold) %>%
+  summarise(
+    n_total    = n(),
+    n_failed   = sum(failed),
+    pct_failed = 100 * mean(failed),
+    .groups    = "drop"
+  )
+
+ggplot(
+  failure_grid,
+  aes(
+    x    = factor(corr_threshold),
+    y    = factor(n_components),
+    fill = pct_failed
+  )
+) +
+  geom_tile(colour = "grey92", linewidth = 0.35) +
+  geom_text(
+    aes(label = sprintf("%.0f%%\n(%d/%d)",
+                        pct_failed, n_failed, n_total)),
+    size = 2.8, lineheight = 0.9
+  ) +
+  scale_fill_gradient(
+    name     = "% failed",
+    low      = "white",
+    high     = "#b2182b",
+    limits   = c(0, max(100, max(failure_grid$pct_failed, na.rm = TRUE))),
+    na.value = "grey85"
+  ) +
+  labs(
+    title    = "Compression failure rate on the tuning grid",
+    subtitle = "% of (cell type, gene) pairs with missing reproduction_pct",
+    x = "corr_threshold (partition cut height)",
+    y = "n_components (mclust per cluster)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(panel.grid = element_blank())
+```
+
+## 1.2 Failure rate by cell type
+
+```{r}
+#| label: failure-by-celltype
+#| fig-width: 9
+#| fig-height: 5
+
+failure_per_ct <-
+  param_tunning_long %>%
+  group_by(cell_type) %>%
+  summarise(
+    n_total    = n(),
+    n_failed   = sum(failed),
+    pct_failed = 100 * mean(failed),
+    n_genes    = n_distinct(.feature),
+    n_genes_any_fail = n_distinct(.feature[failed]),
+    n_genes_all_fail = sum(
+      tapply(failed, .feature, function(x) all(x))
+    ),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(pct_failed))
+
+cat("Failure summary per cell type:\n")
+print(failure_per_ct)
+
+ggplot(
+  failure_per_ct,
+  aes(x = fct_reorder(cell_type, pct_failed), y = pct_failed)
+) +
+  geom_col(fill = "#b2182b", alpha = 0.85) +
+  geom_text(
+    aes(label = sprintf("%d/%d (%.0f%%)", n_failed, n_total, pct_failed)),
+    hjust = -0.05, size = 3
+  ) +
+  coord_flip() +
+  scale_y_continuous(
+    expand = expansion(mult = c(0, 0.15)),
+    labels = function(x) paste0(x, "%")
+  ) +
+  labs(
+    title = "Compression failure rate per cell type",
+    subtitle = "Aggregated over the full (n_components, corr_threshold) grid",
+    x = NULL,
+    y = "% of grid rows failed"
+  ) +
+  theme_bw(base_size = 12)
+```
+
+## 1.3 Failure surface by cell type
+
+Same view as Section 1.1, faceted by cell type—useful for seeing whether a bad
+parameter cell is universal or specific to one lineage.
+
+```{r}
+#| label: failure-grid-by-celltype
+#| fig-width: 12
+#| fig-height: 8
+
+failure_grid_ct <-
+  param_tunning_long %>%
+  group_by(cell_type, n_components, corr_threshold) %>%
+  summarise(
+    n_total    = n(),
+    n_failed   = sum(failed),
+    pct_failed = 100 * mean(failed),
+    .groups    = "drop"
+  )
+
+ggplot(
+  failure_grid_ct,
+  aes(
+    x    = factor(corr_threshold),
+    y    = factor(n_components),
+    fill = pct_failed
+  )
+) +
+  geom_tile(colour = "grey95", linewidth = 0.2) +
+  facet_wrap(~ cell_type, ncol = 5) +
+  scale_fill_gradient(
+    name     = "% failed",
+    low      = "white",
+    high     = "#b2182b",
+    limits   = c(0, 100),
+    na.value = "grey85"
+  ) +
+  labs(
+    title    = "Failure surface per cell type",
+    subtitle = "Empty / white = no failures, dark = all genes failed at that grid cell",
+    x = "corr_threshold",
+    y = "n_components"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(
+    panel.grid  = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+    axis.text.y = element_text(size = 8),
+    strip.text  = element_text(size = 9)
+  )
+```
+
+## 1.4 Failures vs gene abundance
+
+If failures cluster at low or high expression, a single universal default
+(Section 5) may only work for part of the abundance range.
+
+```{r}
+#| label: failure-by-gene-abundance
+#| fig-width: 10
+#| fig-height: 5
+
+gene_failure <-
+  param_tunning_long %>%
+  group_by(cell_type, .feature, mean_log2_cpm) %>%
+  summarise(
+    n_total    = n(),
+    n_failed   = sum(failed),
+    pct_failed = 100 * mean(failed),
+    .groups    = "drop"
+  )
+
+ggplot(
+  gene_failure %>% filter(!is.na(mean_log2_cpm)),
+  aes(x = mean_log2_cpm, y = pct_failed)
+) +
+  geom_point(aes(colour = cell_type), size = 1.8, alpha = 0.7) +
+  geom_smooth(method = "loess", se = TRUE, colour = "grey20") +
+  scale_y_continuous(labels = function(x) paste0(x, "%"),
+                     limits = c(0, 100)) +
+  scale_colour_viridis_d(option = "turbo", name = "cell_type") +
+  labs(
+    title    = "Per-gene compression failure fraction vs abundance",
+    subtitle = "y = % of the (n_components, corr_threshold) grid that failed for this gene",
+    x = "gene mean log2 CPM (pseudobulk)",
+    y = "% of grid failed"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(legend.position = "right",
+        legend.text     = element_text(size = 7),
+        legend.key.size = unit(0.4, "cm"))
+```
+
+## 1.5 Failures vs maximum block size
+
+`block_size_max` is the largest cluster in the correlation partition before
+compression. Larger blocks imply higher-dimensional mixture fits and may
+coincide with more failures.
+
+```{r}
+#| label: failure-vs-block-size-max
+#| fig-width: 11
+#| fig-height: 5.5
+
+blk <- param_tunning_long %>%
+  filter(!is.na(block_size_max))
+
+sp <- suppressWarnings(
+  cor.test(blk$block_size_max, as.numeric(blk$failed), method = "spearman")
+)
+cat(sprintf(
+  "Spearman rho (block_size_max vs failed): %.3f, p = %.3g\n",
+  unname(sp$estimate), sp$p.value
+))
+
+p_box <- ggplot(
+  blk,
+  aes(
+    x = factor(failed, levels = c(FALSE, TRUE), labels = c("OK", "failed")),
+    y = block_size_max,
+    fill = failed
+  )
+) +
+  geom_boxplot(outlier.alpha = 0.06, linewidth = 0.35) +
+  scale_y_continuous(trans = "sqrt", labels = label_number()) +
+  scale_fill_manual(values = c(`FALSE` = "#4393c3", `TRUE` = "#b2182b"), guide = "none") +
+  labs(
+    title = "Maximum block size by outcome",
+    x = NULL,
+    y = "block_size_max (sqrt scale)"
+  ) +
+  theme_bw(base_size = 11)
+
+blk_bin <- blk %>%
+  mutate(bmax_grp = cut_number(block_size_max, n = 20)) %>%
+  group_by(bmax_grp) %>%
+  summarise(
+    n = n(),
+    pct_fail = 100 * mean(failed),
+    m_mid = median(block_size_max),
+    .groups = "drop"
+  )
+
+p_rate <- ggplot(blk_bin, aes(x = m_mid, y = pct_fail, size = n)) +
+  geom_point(alpha = 0.8, colour = "#7f1d1d") +
+  geom_smooth(aes(weight = n), method = "loess", se = TRUE, linewidth = 0.65, colour = "grey25") +
+  scale_size_area(max_size = 7, name = "n rows") +
+  scale_y_continuous(limits = c(0, NA), labels = function(x) paste0(x, "%")) +
+  labs(
+    title = "Failure rate along block_size_max",
+    x = "median block_size_max in bin",
+    y = "% failed"
+  ) +
+  theme_bw(base_size = 11)
+
+p_box + p_rate + plot_layout(ncol = 2)
+```
+
+## 1.6 Gene-wide vs grid-wide failures
+
+- **Whole-gene failure** — every grid cell failed: likely a bad `brms` fit; drop the gene.
+- **Whole-grid-cell failure** — every gene failed at one `(n_components, corr_threshold)`: drop that cell from the universal search.
+
+```{r}
+#| label: failure-decomposition
+
+gene_all_failed <-
+  param_tunning_long %>%
+  group_by(cell_type, .feature) %>%
+  summarise(all_failed = all(failed), any_failed = any(failed),
+            .groups = "drop") %>%
+  summarise(
+    n_genes              = n(),
+    n_genes_any_failure  = sum(any_failed),
+    n_genes_all_failure  = sum(all_failed),
+    pct_genes_all_failure = 100 * mean(all_failed)
+  )
+
+grid_all_failed <-
+  param_tunning_long %>%
+  group_by(n_components, corr_threshold) %>%
+  summarise(all_failed = all(failed), .groups = "drop") %>%
+  summarise(
+    n_grid_cells          = n(),
+    n_grid_cells_all_fail = sum(all_failed),
+    pct_grid_cells_all_fail = 100 * mean(all_failed)
+  )
+
+cat("Whole-gene failures (every grid cell NA for that gene):\n")
+print(gene_all_failed)
+
+cat("\nWhole-grid-cell failures (every gene NA at that (n_comp, thr)):\n")
+print(grid_all_failed)
+```
+
+### 1.6.1 Failure pattern per gene on the grid
+
+For each cell type we plot up to 25 whole-gene failures plus 20 genes with
+the highest partial failure rate. Light tiles succeeded; dark tiles failed.
+
+```{r}
+#| label: failure-gene-grid-heatmap
+#| fig-width: 14
+#| fig-height: 10
+
+gene_fail_stats <- param_tunning_long %>%
+  group_by(cell_type, .feature) %>%
+  summarise(
+    pct_failed = 100 * mean(failed),
+    whole_gene_fail = all(failed),
+    .groups = "drop"
+  )
+
+genes_for_grid <- gene_fail_stats %>%
+  filter(pct_failed > 0) %>%
+  group_by(cell_type) %>%
+  group_modify(~ bind_rows(
+    .x %>% filter(whole_gene_fail) %>% slice_head(n = 25),
+    .x %>% filter(!whole_gene_fail) %>% slice_max(pct_failed, n = 20)
+  )) %>%
+  distinct(cell_type, .feature) %>%
+  ungroup()
+
+fail_tile <- param_tunning_long %>%
+  semi_join(genes_for_grid, by = c("cell_type", ".feature")) %>%
+  mutate(
+    grid_id = interaction(factor(n_components), factor(corr_threshold), sep = " | "),
+    gene_lab = str_trunc(as.character(.feature), 22),
+    status = if_else(failed, "failed", "OK")
+  ) %>%
+  left_join(
+    gene_fail_stats %>%
+      mutate(
+        gene_lab = str_trunc(as.character(.feature), 22),
+        ord = as.numeric(whole_gene_fail) * 1e6 + pct_failed
+      ) %>%
+      select(cell_type, gene_lab, ord),
+    by = c("cell_type", "gene_lab")
+  ) %>%
+  group_by(cell_type) %>%
+  mutate(row_lab_f = fct_reorder(factor(gene_lab), ord, .fun = mean)) %>%
+  ungroup()
+
+ncol_ct <- min(4L, n_distinct(fail_tile$cell_type))
+
+ggplot(fail_tile, aes(grid_id, row_lab_f, fill = status)) +
+  geom_tile(colour = "grey88", linewidth = 0.15) +
+  scale_x_discrete(guide = guide_axis(angle = 55)) +
+  scale_fill_manual(values = c(OK = "grey96", failed = "#b2182b")) +
+  facet_wrap(~ cell_type, ncol = ncol_ct, scales = "free_y") +
+  labs(
+    title = "Where each gene fails on the tuning grid",
+    x = "n_components | corr_threshold",
+    y = NULL
+  ) +
+  theme_minimal(base_size = 10) +
+  theme(panel.grid = element_blank(), strip.text = element_text(face = "bold", size = 9))
+```
+
+High `pct_genes_all_failure` means later global summaries use fewer genes.
+Drop any `(n_components, corr_threshold)` with `grid_cells_all_fail` before
+Section 3. Grid means use `na.rm = TRUE`; per-gene bests use rows with a
+valid `reproduction_pct`.
+
+::: {.callout-important}
+## Why compression failed (and why this is no longer a concern)
+
+The missing `reproduction_pct` values above come from two distinct causes:
+
+1. **BiocParallel / `SnowParam` port errors** (e.g. *cannot find an open
+   port*) — almost certainly an artefact of the HPC execution environment,
+   not of **poco** itself. They are uncommon, typically cleared by
+   re-running the affected `{targets}` step, and should not be interpreted
+   as a systematic compression defect.
+
+2. **Over-parameterised `mclust` fits during tuning** — the remaining
+   failures reflect a mismatch between the mixture complexity requested on
+   the grid and the effective dimensionality of the posterior draws: many
+   parameters per correlation block, but only a limited number of MCMC
+   draws to support them. We originally required correlated blocks to use
+   **full-covariance** mixtures so pairwise structure can be preserved; at
+   extreme `(n_components, corr_threshold)` settings that model could not
+   be estimated.
+
+The current **poco** release still prefers full-covariance mixtures for
+correlated clusters, but **automatically switches to a simpler model when a
+fit fails**. Compression failures of the kind plotted in this section are
+therefore resolved in the updated package and are not expected to affect
+the parameter choices in Sections 3–6.
+:::
+
+# 2. Compression efficiency (storage footprint)
+
+`compression_rate` is `compression_size / original_draw_size` (RAM footprint of
+the compressed draws matrix vs the uncompressed `as_draws_matrix` object).
+Smaller values mean a tighter representation. Summaries use rows with
+`compression_ok == TRUE` and non-missing `compression_rate`, loaded from
+`compression_size.rds` (`compression_results_long`).
+
+```{r}
+#| label: compression-rate-overview
+
+comp_rate_ok <- compression_results_long %>%
+  filter(as.logical(compression_ok), !is.na(compression_rate))
+
+cat(sprintf(
+  "Compression size section: %d / %d rows with successful compression and non-NA compression_rate.\n\n",
+  nrow(comp_rate_ok),
+  nrow(compression_results_long)
+))
+
+rate_overall <- comp_rate_ok %>%
+  summarise(
+    n_rows      = n(),
+    min_rate    = min(compression_rate, na.rm = TRUE),
+    q25_rate    = quantile(compression_rate, 0.25, na.rm = TRUE),
+    median_rate = median(compression_rate, na.rm = TRUE),
+    mean_rate   = mean(compression_rate, na.rm = TRUE),
+    q75_rate    = quantile(compression_rate, 0.75, na.rm = TRUE),
+    max_rate    = max(compression_rate, na.rm = TRUE)
+  )
+
+cat("Overall compression_rate (compressed / original), successful runs only:\n")
+print(rate_overall)
+
+rate_grid <- comp_rate_ok %>%
+  group_by(n_components, corr_threshold) %>%
+  summarise(
+    n           = n(),
+    median_rate = median(compression_rate, na.rm = TRUE),
+    mean_rate   = mean(compression_rate, na.rm = TRUE),
+    q25_rate    = quantile(compression_rate, 0.25, na.rm = TRUE),
+    q75_rate    = quantile(compression_rate, 0.75, na.rm = TRUE),
+    mean_blocks = mean(n_blocks, na.rm = TRUE),
+    .groups     = "drop"
+  ) %>%
+  arrange(median_rate)
+
+cat("\nTightest grid cells by median compression_rate (top 12), successful runs only:\n")
+print(head(rate_grid, 12))
+```
+
+### 2.1 Median compression rate on the parameter grid
+
+```{r}
+#| label: compression-rate-grid-heatmap
+#| fig-width: 9
+#| fig-height: 5
+
+rate_heat <- comp_rate_ok %>%
+  group_by(n_components, corr_threshold) %>%
+  summarise(median_rate = median(compression_rate, na.rm = TRUE), .groups = "drop")
+
+ggplot(
+  rate_heat,
+  aes(
+    x    = factor(corr_threshold),
+    y    = factor(n_components),
+    fill = median_rate
+  )
+) +
+  geom_tile(colour = "grey92", linewidth = 0.35) +
+  geom_text(aes(label = scales::percent(median_rate, accuracy = 0.1)), size = 2.8) +
+  scale_fill_viridis_c(
+    option    = "C",
+    name      = "median\nrate",
+    labels    = scales::percent_format(accuracy = 1),
+    direction = -1,
+    na.value  = "grey85"
+  ) +
+  labs(
+    title    = "Median compression rate across the tuning grid",
+    subtitle = "Successful compressions only; lower = smaller footprint vs uncompressed draws",
+    x        = "corr_threshold",
+    y        = "n_components"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(panel.grid = element_blank())
+```
+
+### 2.2 Compression rate distributions by tuning parameters
+
+```{r}
+#| label: compression-rate-param-boxplots
+#| fig-width: 11
+#| fig-height: 5
+
+p_rate_nc <- ggplot(
+  comp_rate_ok %>% filter(!is.na(compression_rate)),
+  aes(x = factor(n_components), y = compression_rate)
+) +
+  geom_boxplot(outlier.alpha = 0.15, fill = "#4393c3", colour = "grey30") +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  labs(
+    title = "Compression rate by n_components",
+    subtitle = "Successful compressions only; rate = compressed size / original draws size",
+    x     = "n_components",
+    y     = "compression_rate"
+  ) +
+  theme_bw(base_size = 11)
+
+p_rate_corr <- ggplot(
+  comp_rate_ok %>% filter(!is.na(compression_rate)),
+  aes(x = factor(corr_threshold), y = compression_rate)
+) +
+  geom_boxplot(outlier.alpha = 0.15, fill = "#d6604d", colour = "grey30") +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  labs(
+    title = "Compression rate by corr_threshold",
+    subtitle = "Successful compressions only",
+    x     = "corr_threshold",
+    y     = "compression_rate"
+  ) +
+  theme_bw(base_size = 11) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+p_rate_nc + p_rate_corr + plot_layout(ncol = 2)
+```
+
+### 2.3 Compression rate vs partition size and abundance
+
+Finer partitions (more blocks) or genes at different abundance may shift how much
+structure the mixture must retain, which feeds through to object size.
+
+```{r}
+#| label: compression-rate-covariates
+#| fig-width: 11
+#| fig-height: 5.5
+
+dat_rate_blocks <- comp_rate_ok %>%
+  filter(!is.na(compression_rate), !is.na(n_blocks))
+
+pr_blocks <- ggplot(dat_rate_blocks, aes(x = n_blocks, y = compression_rate, colour = factor(n_components))) +
+  geom_point(alpha = 0.12, size = 0.6) +
+  geom_smooth(method = "loess", se = TRUE, linewidth = 0.9, colour = "grey25") +
+  scale_colour_viridis_d(option = "turbo", name = "n_components") +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  labs(
+    title = "compression_rate vs n_blocks",
+    subtitle = "Successful compressions only; colour = n_components",
+    x     = "n_blocks (partition)",
+    y     = "compression_rate"
+  ) +
+  theme_bw(base_size = 11)
+
+dat_rate_abund <- comp_rate_ok %>%
+  filter(!is.na(compression_rate), !is.na(mean_log2_cpm))
+
+pr_abund <- ggplot(dat_rate_abund, aes(x = mean_log2_cpm, y = compression_rate)) +
+  geom_bin2d(bins = 40) +
+  scale_fill_viridis_c(option = "B", end = 0.9, name = "count") +
+  geom_smooth(method = "loess", se = TRUE, colour = "orangered", linewidth = 0.9) +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+  labs(
+    title = "compression_rate vs mean_log2_cpm",
+    subtitle = "Successful compressions only",
+    x     = "mean log2 CPM",
+    y     = "compression_rate"
+  ) +
+  theme_bw(base_size = 11)
+
+pr_blocks + pr_abund + plot_layout(ncol = 2)
+```
+
+```{r}
+#| label: compression-rate-spearman
+
+rate_cor <- comp_rate_ok %>%
+  filter(!is.na(compression_rate)) %>%
+  summarise(
+    cor_rate_blocks = suppressWarnings(
+      cor(compression_rate, n_blocks, use = "pairwise.complete.obs", method = "spearman")
+    ),
+    cor_rate_bmax = suppressWarnings(
+      cor(compression_rate, block_size_max, use = "pairwise.complete.obs", method = "spearman")
+    ),
+    cor_rate_bmed = suppressWarnings(
+      cor(compression_rate, block_size_med, use = "pairwise.complete.obs", method = "spearman")
+    ),
+    cor_rate_abund = suppressWarnings(
+      cor(compression_rate, mean_log2_cpm, use = "pairwise.complete.obs", method = "spearman")
+    )
+  )
+
+cat("Spearman correlation of compression_rate with covariates (successful compressions only):\n")
+print(rate_cor)
+```
+
+### 2.4 Median compression rate by cell type
+
+```{r}
+#| label: compression-rate-by-celltype
+#| fig-width: 9
+#| fig-height: 5.5
+
+rate_ct <- comp_rate_ok %>%
+  group_by(cell_type) %>%
+  summarise(
+    n           = n(),
+    median_rate = median(compression_rate, na.rm = TRUE),
+    mean_rate   = mean(compression_rate, na.rm = TRUE),
+    q75_rate    = quantile(compression_rate, 0.75, na.rm = TRUE),
+    .groups     = "drop"
+  ) %>%
+  arrange(median_rate)
+
+cat("Median compression_rate per cell type (successful compressions only):\n")
+print(rate_ct)
+
+ggplot(rate_ct, aes(x = fct_reorder(cell_type, median_rate), y = median_rate)) +
+  geom_col(fill = "#2166ac", alpha = 0.9) +
+  geom_errorbar(
+    aes(ymin = median_rate, ymax = q75_rate),
+    width = 0.2,
+    colour = "grey35"
+  ) +
+  coord_flip() +
+  scale_y_continuous(
+    labels = scales::percent_format(accuracy = 1),
+    expand = expansion(mult = c(0, 0.08))
+  ) +
+  labs(
+    title    = "Median compression rate per cell type",
+    subtitle = "Successful runs; error bar top = 75th percentile of compression_rate within type",
+    x        = NULL,
+    y        = "median compression_rate"
+  ) +
+  theme_bw(base_size = 12)
+```
+
+# 3. Compression runtime
+
+`time_used` is seconds for `compress_brmsfit()` only (partitioning excluded).
+Summaries below use rows with `compression_ok == TRUE`.
+
+```{r}
+#| label: time-used-overview
+
+param_time_ok <- param_tunning_long %>%
+  filter(as.logical(compression_ok))
+
+cat(sprintf(
+  "Time section: %d / %d rows with successful compression (compression_ok is true).\n\n",
+  nrow(param_time_ok),
+  nrow(param_tunning_long)
+))
+
+time_overall <- param_time_ok %>%
+  summarise(
+    n_rows      = n(),
+    n_na_time   = sum(is.na(time_used)),
+    min_s       = min(time_used, na.rm = TRUE),
+    q25_s       = quantile(time_used, 0.25, na.rm = TRUE),
+    median_s    = median(time_used, na.rm = TRUE),
+    mean_s      = mean(time_used, na.rm = TRUE),
+    q75_s       = quantile(time_used, 0.75, na.rm = TRUE),
+    max_s       = max(time_used, na.rm = TRUE)
+  )
+
+cat("Overall time_used (seconds), successful compressions only:\n")
+print(time_overall)
+
+time_grid <- param_time_ok %>%
+  group_by(n_components, corr_threshold) %>%
+  summarise(
+    n          = n(),
+    median_s   = median(time_used, na.rm = TRUE),
+    mean_s     = mean(time_used, na.rm = TRUE),
+    q25_s      = quantile(time_used, 0.25, na.rm = TRUE),
+    q75_s      = quantile(time_used, 0.75, na.rm = TRUE),
+    mean_blocks = mean(n_blocks, na.rm = TRUE),
+    .groups    = "drop"
+  ) %>%
+  arrange(desc(median_s))
+
+cat("\nSlowest grid cells by median time_used (top 12), successful runs only:\n")
+print(head(time_grid, 12))
+```
+
+## 3.1 Median runtime on the parameter grid
+
+```{r}
+#| label: time-used-grid-heatmap
+#| fig-width: 9
+#| fig-height: 5
+
+time_heat <- param_time_ok %>%
+  group_by(n_components, corr_threshold) %>%
+  summarise(median_s = median(time_used, na.rm = TRUE), .groups = "drop")
+
+ggplot(
+  time_heat,
+  aes(
+    x    = factor(corr_threshold),
+    y    = factor(n_components),
+    fill = median_s
+  )
+) +
+  geom_tile(colour = "grey92", linewidth = 0.35) +
+  geom_text(aes(label = sprintf("%.1fs", median_s)), size = 2.8) +
+  scale_fill_viridis_c(
+    option = "C",
+    name   = "median\nseconds",
+    trans  = "sqrt",
+    labels = label_number(accuracy = 0.1)
+  ) +
+  labs(
+    title    = "Median compression time across the tuning grid",
+    subtitle = "Successful compressions only; sqrt colour scale for fast vs slow cells",
+    x        = "corr_threshold",
+    y        = "n_components"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(panel.grid = element_blank())
+```
+
+## 3.2 Runtime distributions
+
+```{r}
+#| label: time-used-param-boxplots
+#| fig-width: 11
+#| fig-height: 5
+
+p_nc <- ggplot(
+  param_time_ok %>% filter(!is.na(time_used)),
+  aes(x = factor(n_components), y = time_used)
+) +
+  geom_boxplot(outlier.alpha = 0.15, fill = "#4393c3", colour = "grey30") +
+  scale_y_continuous(labels = label_number(suffix = " s"), trans = "sqrt") +
+  labs(
+    title = "Time by n_components",
+    subtitle = "Successful compressions only; sqrt y-axis for long tail",
+    x     = "n_components",
+    y     = "time_used (s)"
+  ) +
+  theme_bw(base_size = 11)
+
+p_corr <- ggplot(
+  param_time_ok %>% filter(!is.na(time_used)),
+  aes(x = factor(corr_threshold), y = time_used)
+) +
+  geom_boxplot(outlier.alpha = 0.15, fill = "#d6604d", colour = "grey30") +
+  scale_y_continuous(labels = label_number(suffix = " s"), trans = "sqrt") +
+  labs(
+    title = "Time by corr_threshold",
+    subtitle = "Successful compressions only",
+    x     = "corr_threshold",
+    y     = "time_used (s)"
+  ) +
+  theme_bw(base_size = 11) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+p_nc + p_corr + plot_layout(ncol = 2)
+```
+
+## 3.3 Runtime vs partition size and abundance
+
+More blocks or larger blocks usually mean more mixture fits inside
+`compress_brmsfit()`, so wall time should rise with partition complexity.
+
+```{r}
+#| label: time-used-covariates
+#| fig-width: 11
+#| fig-height: 5.5
+
+dat_blocks <- param_time_ok %>%
+  filter(!is.na(time_used), !is.na(n_blocks))
+
+pu_blocks <- ggplot(dat_blocks, aes(x = n_blocks, y = time_used, colour = factor(n_components))) +
+  geom_point(alpha = 0.12, size = 0.6) +
+  geom_smooth(method = "loess", se = TRUE, linewidth = 0.9, colour = "grey25") +
+  scale_colour_viridis_d(option = "turbo", name = "n_components") +
+  scale_y_continuous(labels = label_number(suffix = " s"), trans = "sqrt") +
+  labs(
+    title = "time_used vs n_blocks",
+    subtitle = "Successful compressions only; colour = n_components",
+    x     = "n_blocks (partition)",
+    y     = "time_used (s)"
+  ) +
+  theme_bw(base_size = 11)
+
+dat_abund <- param_time_ok %>%
+  filter(!is.na(time_used), !is.na(mean_log2_cpm))
+
+pu_abund <- ggplot(dat_abund, aes(x = mean_log2_cpm, y = time_used)) +
+  geom_bin2d(bins = 40) +
+  scale_fill_viridis_c(option = "B", end = 0.9, name = "count") +
+  geom_smooth(method = "loess", se = TRUE, colour = "orangered", linewidth = 0.9) +
+  scale_y_continuous(labels = label_number(suffix = " s"), trans = "sqrt") +
+  labs(
+    title = "time_used vs mean_log2_cpm",
+    subtitle = "Successful compressions only",
+    x     = "mean log2 CPM",
+    y     = "time_used (s)"
+  ) +
+  theme_bw(base_size = 11)
+
+pu_blocks + pu_abund + plot_layout(ncol = 2)
+```
+
+```{r}
+#| label: time-used-spearman
+
+time_cor <- param_time_ok %>%
+  filter(!is.na(time_used)) %>%
+  summarise(
+    cor_time_blocks = suppressWarnings(
+      cor(time_used, n_blocks, use = "pairwise.complete.obs", method = "spearman")
+    ),
+    cor_time_bmax = suppressWarnings(
+      cor(time_used, block_size_max, use = "pairwise.complete.obs", method = "spearman")
+    ),
+    cor_time_bmed = suppressWarnings(
+      cor(time_used, block_size_med, use = "pairwise.complete.obs", method = "spearman")
+    ),
+    cor_time_abund = suppressWarnings(
+      cor(time_used, mean_log2_cpm, use = "pairwise.complete.obs", method = "spearman")
+    )
+  )
+
+cat("Spearman correlation of time_used with covariates (successful compressions only):\n")
+print(time_cor)
+```
+
+## 3.4 Median runtime by cell type
+
+```{r}
+#| label: time-used-by-celltype
+#| fig-width: 9
+#| fig-height: 5.5
+
+time_ct <- param_time_ok %>%
+  group_by(cell_type) %>%
+  summarise(
+    n        = n(),
+    median_s = median(time_used, na.rm = TRUE),
+    mean_s   = mean(time_used, na.rm = TRUE),
+    q75_s    = quantile(time_used, 0.75, na.rm = TRUE),
+    .groups  = "drop"
+  ) %>%
+  arrange(desc(median_s))
+
+cat("Median time_used (s) per cell type (successful compressions only):\n")
+print(time_ct)
+
+ggplot(time_ct, aes(x = fct_reorder(cell_type, median_s), y = median_s)) +
+  geom_col(fill = "#2166ac", alpha = 0.9) +
+  geom_errorbar(
+    aes(ymin = median_s, ymax = q75_s),
+    width = 0.2,
+    colour = "grey35"
+  ) +
+  coord_flip() +
+  scale_y_continuous(labels = label_number(suffix = " s"), expand = expansion(mult = c(0, 0.08))) +
+  labs(
+    title    = "Median compression time per cell type",
+    subtitle = "Successful runs; error bar top = 75th percentile of time_used within type",
+    x        = NULL,
+    y        = "median time_used (s)"
+  ) +
+  theme_bw(base_size = 12)
+```
+
+# 4. Universal compression setting
+
+For each `(n_components, corr_threshold)` we average `reproduction_pct`
+(mean of energy and C2ST fidelity) over all genes and cell types. The
+heatmap shows the global surface; the circled cell is the best default,
+and the dashed outline marks cells within 0.5 percentage points of that peak.
+
+```{r}
+#| label: overall-grid-summary
+
+overall_grid <-
+  param_tunning_long %>%
+  group_by(n_components, corr_threshold) %>%
+  summarise(
+    mean_repro   = mean(reproduction_pct,   na.rm = TRUE),
+    median_repro = median(reproduction_pct, na.rm = TRUE),
+    sd_repro     = sd(reproduction_pct,     na.rm = TRUE),
+    q25_repro    = quantile(reproduction_pct, 0.25, na.rm = TRUE),
+    q75_repro    = quantile(reproduction_pct, 0.75, na.rm = TRUE),
+    mean_blocks  = mean(n_blocks,           na.rm = TRUE),
+    n_obs        = sum(!is.na(reproduction_pct)),
+    .groups      = "drop"
+  )
+
+best_overall <- overall_grid %>%
+  filter(!is.na(mean_repro)) %>%
+  slice_max(mean_repro, n = 1, with_ties = FALSE, na_rm = TRUE)
+plateau_thr  <- best_overall$mean_repro - 0.5
+
+n_pairs_total <- nrow(distinct(param_tunning_long, cell_type, .feature))
+n_pairs_ok    <- nrow(distinct(
+  param_tunning_long %>% filter(!failed),
+  cell_type, .feature
+))
+
+cat("Best overall (max mean reproduction_pct):\n")
+print(best_overall)
+```
+
+## 4.1 Mean reproduction heatmap
+
+```{r}
+#| label: overall-heatmap
+#| fig-width: 9
+#| fig-height: 5
+
+repro_rng    <- range(overall_grid$mean_repro, na.rm = TRUE)
+repro_pad    <- max(0.25, 0.03 * diff(repro_rng))
+repro_limits <- c(repro_rng[1] - repro_pad, repro_rng[2] + repro_pad)
+
+ggplot(
+  overall_grid,
+  aes(
+    x    = factor(corr_threshold),
+    y    = factor(n_components),
+    fill = mean_repro
+  )
+) +
+  geom_tile(colour = "grey92", linewidth = 0.35) +
+  geom_text(
+    aes(label = sprintf("%.1f", mean_repro)),
+    colour = "black", size = 3
+  ) +
+  # within-0.5pp plateau
+  geom_tile(
+    data = overall_grid %>% filter(mean_repro >= plateau_thr),
+    fill = NA, colour = "grey20", linewidth = 0.6, linetype = "dashed"
+  ) +
+  # the single best cell
+  geom_point(
+    data = best_overall,
+    inherit.aes = FALSE,
+    aes(
+      x = factor(corr_threshold),
+      y = factor(n_components)
+    ),
+    shape = 21, size = 9, stroke = 1.2,
+    fill = NA, colour = "black"
+  ) +
+  scale_fill_gradient(
+    name = sprintf(
+      "mean reproduction %%\n(range %.1f-%.1f)",
+      repro_rng[1], repro_rng[2]
+    ),
+    low      = "white",
+    high     = "#b2182b",
+    limits   = repro_limits,
+    oob      = scales::squish,
+    na.value = "grey85"
+  ) +
+  labs(
+    title    = "Universal compression-fidelity grid",
+    subtitle = glue(
+      "Means exclude NA; {n_pairs_ok} of {n_pairs_total} (cell_type, gene) pairs contribute | ",
+      "best = n_components={best_overall$n_components}, corr_threshold={best_overall$corr_threshold} ",
+      "({sprintf('%.2f%%', best_overall$mean_repro)})"
+    ),
+    x = "corr_threshold (partition cut height)",
+    y = "n_components (mclust per cluster)"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(panel.grid = element_blank())
+```
+
+## 4.2 Mean reproduction along corr_threshold
+
+Each line is one `n_components` level. The ribbon is the IQR across genes
+and cell types. The dashed line marks the best universal `corr_threshold`.
+
+```{r}
+#| label: overall-line
+#| fig-width: 11
+#| fig-height: 5
+
+ggplot(
+  overall_grid,
+  aes(
+    x      = corr_threshold,
+    y      = mean_repro,
+    colour = factor(n_components),
+    fill   = factor(n_components),
+    group  = n_components
+  )
+) +
+  geom_ribbon(
+    aes(ymin = q25_repro, ymax = q75_repro),
+    alpha = 0.12, colour = NA
+  ) +
+  geom_line(linewidth = 0.7) +
+  geom_point(size = 2) +
+  geom_vline(
+    xintercept = best_overall$corr_threshold,
+    linetype = "dashed", colour = "grey40"
+  ) +
+  annotate(
+    "label",
+    x = best_overall$corr_threshold,
+    y = best_overall$mean_repro,
+    label = glue(
+      "best: n_comp={best_overall$n_components}, ",
+      "thr={best_overall$corr_threshold}"
+    ),
+    hjust = -0.05, size = 3.2, label.size = 0
+  ) +
+  scale_colour_viridis_d(option = "viridis", end = 0.9, name = "n_components") +
+  scale_fill_viridis_d  (option = "viridis", end = 0.9, guide = "none") +
+  labs(
+    title    = "Mean reproduction across `corr_threshold`",
+    subtitle = "Ribbon = IQR across (cell_type, gene)",
+    x        = "corr_threshold",
+    y        = "reproduction (%)"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(legend.position = "bottom")
+```
+
+## 4.3 Energy and C2ST components
+
+`reproduction_pct` averages `energy_pct` and `c2st_pct`. Plotting each
+metric checks that the headline score is not masking opposite behaviour.
+
+```{r}
+#| label: overall-line-by-metric
+#| fig-width: 11
+#| fig-height: 4
+
+param_tunning_long %>%
+  select(n_components, corr_threshold, reproduction_pct, energy_pct, c2st_pct) %>%
+  pivot_longer(
+    cols      = c(reproduction_pct, energy_pct, c2st_pct),
+    names_to  = "metric",
+    values_to = "pct"
+  ) %>%
+  group_by(metric, n_components, corr_threshold) %>%
+  summarise(mean_pct = mean(pct, na.rm = TRUE), .groups = "drop") %>%
+  mutate(metric = factor(
+    metric,
+    levels = c("reproduction_pct", "energy_pct", "c2st_pct"),
+    labels = c("mean (headline)", "energy", "C2ST")
+  )) %>%
+  ggplot(aes(
+    x      = corr_threshold,
+    y      = mean_pct,
+    colour = factor(n_components),
+    group  = n_components
+  )) +
+  geom_line(linewidth = 0.7) +
+  geom_point(size = 1.5) +
+  facet_wrap(~ metric, ncol = 3) +
+  scale_colour_viridis_d(option = "viridis", end = 0.9, name = "n_components") +
+  labs(
+    x = "corr_threshold",
+    y = "mean reproduction (%)",
+    title = "Each metric's response to (n_components, corr_threshold)"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(legend.position = "bottom")
+```
+
+
+# 5. Agreement across cell types
+
+If the Section 3 default is sensible, each cell type's own optimum should
+lie on or near that grid cell. The plots below test that.
+
+## 5.1 Fidelity surface per cell type
+
+```{r}
+#| label: per-celltype-heatmap
+#| fig-width: 12
+#| fig-height: 8
+
+ct_grid <-
+  param_tunning_long %>%
+  group_by(cell_type, n_components, corr_threshold) %>%
+  summarise(
+    mean_repro = mean(reproduction_pct, na.rm = TRUE),
+    n_obs      = sum(!is.na(reproduction_pct)),
+    .groups    = "drop"
+  )
+
+best_per_ct <-
+  ct_grid %>%
+  group_by(cell_type) %>%
+  filter(!is.na(mean_repro)) %>%
+  slice_max(mean_repro, n = 1, with_ties = FALSE, na_rm = TRUE) %>%
+  ungroup()
+
+ct_repro_rng <- range(ct_grid$mean_repro, na.rm = TRUE)
+
+ggplot(
+  ct_grid,
+  aes(
+    x    = factor(corr_threshold),
+    y    = factor(n_components),
+    fill = mean_repro
+  )
+) +
+  geom_tile(colour = "grey95", linewidth = 0.2) +
+  geom_point(
+    data  = best_per_ct,
+    inherit.aes = FALSE,
+    aes(
+      x = factor(corr_threshold),
+      y = factor(n_components)
+    ),
+    shape = 21, size = 4, stroke = 0.9,
+    fill = NA, colour = "black"
+  ) +
+  # overall best cell highlighted in every facet for reference
+  geom_point(
+    data  = best_overall %>% select(n_components, corr_threshold),
+    inherit.aes = FALSE,
+    aes(
+      x = factor(corr_threshold),
+      y = factor(n_components)
+    ),
+    shape = 4, size = 3, stroke = 0.8, colour = "white"
+  ) +
+  facet_wrap(~ cell_type, ncol = 5) +
+  scale_fill_gradient(
+    name     = "mean reproduction %",
+    low      = "white",
+    high     = "#b2182b",
+    limits   = ct_repro_rng,
+    oob      = scales::squish,
+    na.value = "grey85"
+  ) +
+  labs(
+    title    = "Compression-fidelity grid per cell type",
+    subtitle = "Black circle = cell type's own best | white cross = overall best",
+    x        = "corr_threshold",
+    y        = "n_components"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(
+    panel.grid = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+    axis.text.y = element_text(size = 8),
+    strip.text  = element_text(size = 9)
+  )
+```
+
+## 5.2 Best setting per cell type
+
+Tight clustering means cell types agree; spread means a single default
+will favour some lineages over others.
+
+```{r}
+#| label: best-per-celltype-scatter
+#| fig-width: 9
+#| fig-height: 5
+
+corr_levels <- sort(unique(param_tunning_long$corr_threshold))
+nc_levels   <- sort(unique(param_tunning_long$n_components))
+
+best_per_ct_plot <- best_per_ct %>%
+  mutate(
+    corr_threshold = factor(corr_threshold, levels = corr_levels),
+    n_components   = factor(n_components, levels = nc_levels)
+  )
+
+best_overall_plot <- best_overall %>%
+  mutate(
+    corr_threshold = factor(corr_threshold, levels = corr_levels),
+    n_components   = factor(n_components, levels = nc_levels)
+  )
+
+ggplot(
+  best_per_ct_plot,
+  aes(x = corr_threshold, y = n_components,
+      colour = cell_type, label = cell_type)
+) +
+  geom_point(size = 3, alpha = 0.85) +
+  ggrepel::geom_text_repel(
+    size = 3, max.overlaps = Inf, box.padding = 0.3, show.legend = FALSE
+  ) +
+  geom_point(
+    data = best_overall_plot,
+    inherit.aes = FALSE,
+    aes(x = corr_threshold, y = n_components),
+    shape = 21, size = 6, stroke = 1.2, fill = NA, colour = "black"
+  ) +
+  scale_colour_viridis_d(option = "turbo", guide = "none") +
+  labs(
+    title = "Best (n_components, corr_threshold) per cell type",
+    subtitle = "Each point sits on a grid value (no jitter) | black circle = overall best",
+    x = "corr_threshold", y = "n_components"
+  ) +
+  theme_bw(base_size = 12)
+```
+
+## 5.3 Cost of the universal default
+
+For each cell type, the gap between its own best `reproduction_pct` and
+the score at the global best `(n_components, corr_threshold)`.
+
+```{r}
+#| label: universal-vs-celltype-best
+#| fig-width: 9
+#| fig-height: 4
+
+ct_at_universal <-
+  ct_grid %>%
+  semi_join(best_overall, by = c("n_components", "corr_threshold")) %>%
+  select(cell_type, repro_at_universal = mean_repro)
+
+ct_best_gap <-
+  best_per_ct %>%
+  select(cell_type, repro_at_own_best = mean_repro,
+         best_n_components = n_components,
+         best_corr_threshold = corr_threshold) %>%
+  left_join(ct_at_universal, by = "cell_type") %>%
+  mutate(
+    gap_pp     = repro_at_own_best - repro_at_universal,
+    cell_type  = fct_reorder(cell_type, gap_pp)
+  )
+
+ggplot(ct_best_gap, aes(x = cell_type)) +
+  geom_segment(
+    aes(xend = cell_type,
+        y    = repro_at_universal,
+        yend = repro_at_own_best),
+    colour = "grey60", linewidth = 0.6
+  ) +
+  geom_point(aes(y = repro_at_universal, colour = "universal setting"),
+             size = 3) +
+  geom_point(aes(y = repro_at_own_best,  colour = "own best"),
+             size = 3) +
+  geom_text(
+    aes(y = repro_at_own_best,
+        label = sprintf("+%.2f pp", gap_pp)),
+    nudge_y = 0.05, size = 3, hjust = 0
+  ) +
+  scale_colour_manual(
+    name   = NULL,
+    values = c("universal setting" = "#2c7fb8",
+               "own best"          = "#b2182b")
+  ) +
+  coord_flip() +
+  labs(
+    title    = "Cost of using one universal (n_components, corr_threshold)",
+    subtitle = glue(
+      "Universal = (n_components={best_overall$n_components}, ",
+      "corr_threshold={best_overall$corr_threshold})"
+    ),
+    x = NULL,
+    y = "mean reproduction (%)"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(legend.position = "bottom")
+```
+
+## 5.4 Rank agreement between cell types
+
+Spearman correlation of mean reproduction ranks across grid cells. Values
+near 1 mean cell types order parameters similarly; low values mean
+genuinely different preferences.
+
+```{r}
+#| label: celltype-rank-agreement
+#| fig-width: 7
+#| fig-height: 6
+
+ct_rank_wide <- ct_grid %>%
+  unite("grid_cell", n_components, corr_threshold, sep = "_") %>%
+  select(cell_type, grid_cell, mean_repro) %>%
+  pivot_wider(names_from = cell_type, values_from = mean_repro)
+
+ct_rank_cor <- cor(
+  ct_rank_wide %>% select(-grid_cell),
+  method = "spearman",
+  use = "pairwise.complete.obs"
+)
+
+ct_rank_cor_df <- as.data.frame(as.table(ct_rank_cor), stringsAsFactors = FALSE)
+names(ct_rank_cor_df) <- c("ct_x", "ct_y", "rho")
+ct_rank_cor_df <- ct_rank_cor_df %>%
+  mutate(
+    ct_x = factor(ct_x, levels = colnames(ct_rank_cor)),
+    ct_y = factor(ct_y, levels = colnames(ct_rank_cor))
+  )
+
+ggplot(ct_rank_cor_df, aes(ct_x, ct_y, fill = rho)) +
+  geom_tile(colour = "white") +
+  geom_text(aes(label = sprintf("%.2f", rho)), size = 2.8) +
+  scale_fill_gradient2(
+    name     = "Spearman rho",
+    low      = "#2c7fb8", mid = "white", high = "#b2182b",
+    midpoint = 0, limits = c(-1, 1)
+  ) +
+  labs(
+    title    = "Across-cell-type agreement on grid-cell ranking",
+    subtitle = "Spearman correlation over 63 (n_components, corr_threshold) cells",
+    x = NULL, y = NULL
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid  = element_blank()
+  )
+```
+
+
+# 6. Gene abundance and parameter choice
+
+For each gene we take the grid cell with highest `reproduction_pct` and
+ask whether that optimum shifts with pseudobulk `mean_log2_cpm`. We also
+plot fidelity at the Section 3 universal setting across abundance—useful
+for spotting genes that need per-gene tuning.
+
+```{r}
+#| label: gene-best-vs-abundance
+
+gene_best <-
+  param_tunning_long %>%
+  filter(!is.na(reproduction_pct)) %>%
+  group_by(.feature, cell_type) %>%
+  slice_max(reproduction_pct, n = 1, with_ties = FALSE, na_rm = TRUE) %>%
+  ungroup() %>%
+  filter(!is.na(mean_log2_cpm)) %>%
+  # carry the per-gene abundance metrics (constant within .feature/cell_type)
+  mutate(
+    abundance_bin = cut(
+      mean_log2_cpm,
+      breaks = quantile(mean_log2_cpm, c(0, 1/3, 2/3, 1), na.rm = TRUE),
+      include.lowest = TRUE,
+      labels = c("low", "mid", "high")
+    )
+  )
+
+cat("Per-gene best parameters and abundance bins:\n")
+print(
+  gene_best %>%
+    count(abundance_bin, n_components, corr_threshold) %>%
+    arrange(desc(n))
+)
+```
+
+## 6.1 Best parameters vs expression
+
+```{r}
+#| label: best-vs-abundance
+#| fig-width: 11
+#| fig-height: 4.5
+
+p_nc <-
+  ggplot(gene_best, aes(x = mean_log2_cpm, y = n_components)) +
+  geom_jitter(aes(colour = cell_type),
+              height = 0.15, width = 0, size = 2, alpha = 0.85) +
+  geom_smooth(method = "lm", se = TRUE, colour = "grey20",
+              linetype = "dashed") +
+  scale_y_continuous(breaks = sort(unique(param_tunning_long$n_components))) +
+  scale_colour_viridis_d(option = "turbo", guide = "none") +
+  labs(
+    x = "gene mean log2 CPM (pseudobulk)",
+    y = "best n_components",
+    title = "Best n_components vs gene abundance"
+  ) +
+  theme_bw(base_size = 12)
+
+p_ct <-
+  ggplot(gene_best, aes(x = mean_log2_cpm, y = corr_threshold)) +
+  geom_jitter(aes(colour = cell_type),
+              height = 0.005, width = 0, size = 2, alpha = 0.85) +
+  geom_smooth(method = "lm", se = TRUE, colour = "grey20",
+              linetype = "dashed") +
+  scale_y_continuous(
+    breaks = sort(unique(param_tunning_long$corr_threshold))
+  ) +
+  scale_colour_viridis_d(option = "turbo", name = "cell_type") +
+  labs(
+    x = "gene mean log2 CPM (pseudobulk)",
+    y = "best corr_threshold",
+    title = "Best corr_threshold vs gene abundance"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(legend.position = "right", legend.text = element_text(size = 7),
+        legend.key.size = unit(0.4, "cm"))
+
+p_nc + p_ct + plot_layout(widths = c(1, 1.25))
+```
+
+```{r}
+#| label: abundance-tests
+
+cor_test_nc <- with(
+  gene_best,
+  suppressWarnings(cor.test(mean_log2_cpm, n_components, method = "spearman"))
+)
+cor_test_ct <- with(
+  gene_best,
+  suppressWarnings(cor.test(mean_log2_cpm, corr_threshold, method = "spearman"))
+)
+
+tibble(
+  parameter    = c("n_components", "corr_threshold"),
+  spearman_rho = c(cor_test_nc$estimate, cor_test_ct$estimate),
+  p_value      = c(cor_test_nc$p.value, cor_test_ct$p.value)
+)
+```
+
+## 6.2 Universal setting vs abundance
+
+A flat trend supports one default for all genes; a slope at low abundance
+flags genes that may need separate settings.
+
+```{r}
+#| label: universal-vs-abundance
+#| fig-width: 9
+#| fig-height: 5
+
+param_tunning_long %>%
+  semi_join(best_overall, by = c("n_components", "corr_threshold")) %>%
+  filter(!is.na(reproduction_pct), !is.na(mean_log2_cpm)) %>%
+  ggplot(aes(x = mean_log2_cpm, y = reproduction_pct)) +
+  geom_point(aes(colour = cell_type), size = 2, alpha = 0.85) +
+  geom_smooth(method = "loess", se = TRUE, colour = "grey20") +
+  scale_colour_viridis_d(option = "turbo", name = "cell_type") +
+  labs(
+    title    = "Universal setting performance vs gene abundance",
+    subtitle = glue(
+      "At n_components={best_overall$n_components}, ",
+      "corr_threshold={best_overall$corr_threshold}"
+    ),
+    x = "gene mean log2 CPM (pseudobulk)",
+    y = "reproduction (%)"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(legend.position = "right",
+        legend.text = element_text(size = 7),
+        legend.key.size = unit(0.4, "cm"))
+```
+
+## 6.3 Grid surfaces by abundance tercile
+
+Different panels suggest abundance-specific optima; similar panels support
+a single universal default.
+
+```{r}
+#| label: grid-by-abundance
+#| fig-width: 11
+#| fig-height: 4.5
+
+abundance_keyed <-
+  param_tunning_long %>%
+  distinct(.feature, cell_type, mean_log2_cpm) %>%
+  filter(!is.na(mean_log2_cpm)) %>%
+  mutate(
+    abundance_bin = cut(
+      mean_log2_cpm,
+      breaks = quantile(mean_log2_cpm, c(0, 1/3, 2/3, 1), na.rm = TRUE),
+      include.lowest = TRUE,
+      labels = c("low", "mid", "high")
+    )
+  ) %>%
+  select(.feature, cell_type, abundance_bin)
+
+grid_by_bin <-
+  param_tunning_long %>%
+  inner_join(abundance_keyed, by = c(".feature", "cell_type")) %>%
+  group_by(abundance_bin, n_components, corr_threshold) %>%
+  summarise(
+    mean_repro = mean(reproduction_pct, na.rm = TRUE),
+    .groups    = "drop"
+  )
+
+best_per_bin <-
+  grid_by_bin %>%
+  group_by(abundance_bin) %>%
+  filter(!is.na(mean_repro), !is.na(abundance_bin)) %>%
+  slice_max(mean_repro, n = 1, with_ties = FALSE, na_rm = TRUE) %>%
+  ungroup()
+
+ggplot(
+  grid_by_bin,
+  aes(
+    x    = factor(corr_threshold),
+    y    = factor(n_components),
+    fill = mean_repro
+  )
+) +
+  geom_tile(colour = "grey95", linewidth = 0.2) +
+  geom_text(aes(label = sprintf("%.1f", mean_repro)),
+            colour = "black", size = 2.6) +
+  geom_point(
+    data = best_per_bin,
+    inherit.aes = FALSE,
+    aes(
+      x = factor(corr_threshold),
+      y = factor(n_components)
+    ),
+    shape = 21, size = 6, stroke = 1.1,
+    fill = NA, colour = "black"
+  ) +
+  facet_wrap(~ abundance_bin, nrow = 1,
+             labeller = label_both) +
+  scale_fill_gradient(
+    name     = "mean reproduction %",
+    low      = "white",
+    high     = "#b2182b",
+    na.value = "grey85"
+  ) +
+  labs(
+    title    = "Grid surface stratified by gene-abundance tercile",
+    subtitle = "Circled cell = best (n_components, corr_threshold) within each tercile",
+    x        = "corr_threshold",
+    y        = "n_components"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(
+    panel.grid = element_blank(),
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 8)
+  )
+```
+
+
+# 7. Summary
+
+Recommended defaults from the grid search:
+
+```{r}
+#| label: summary-table
+
+bind_rows(
+  best_overall %>%
+    transmute(
+      scope = "overall (universal)",
+      n_components, corr_threshold,
+      mean_reproduction_pct = mean_repro
+    ),
+  best_per_ct %>%
+    transmute(
+      scope = paste0("cell_type: ", cell_type),
+      n_components, corr_threshold,
+      mean_reproduction_pct = mean_repro
+    ),
+  best_per_bin %>%
+    transmute(
+      scope = paste0("abundance: ", abundance_bin),
+      n_components, corr_threshold,
+      mean_reproduction_pct = mean_repro
+    )
+)
+```
+
+```{r}
+sessionInfo()
+```
+
